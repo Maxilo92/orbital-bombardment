@@ -1,4 +1,25 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.2.1
+Date: 2026-10-17
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.2.0, which is the Factorio 2.1 release.
+---------------------------------------------------------------------------------------------------
+Version: 0.2.0
+Date: 2026-10-17
+  Graphics:
+    - The rod now falls the way something does at several hundred metres per second: it covers 100
+      tiles in a sixth of a second, too fast to see as an object. What you see is its trail - a
+      white-hot head streaking from the sky to ground zero, then an ionised column that glows on,
+      cools from white to red and fades. The old fall took almost a second and trailed rocket smoke,
+      which made it look like a rocket coming in.
+    - The fall and the blast are now shown on the map and the minimap as well: the streak, then the
+      strike circle flaring up. Entities are not drawn there, so neither was the rod before.
+    - The impact has punch: the dust ring and the shockwave leave ground zero fast and brake hard
+      instead of blooming out slowly, secondary fireballs ripple around ground zero, rock and sparks
+      are thrown up and out with motion trails, and the crater keeps smouldering afterwards.
+  Sounds:
+    - A harder, shorter camera punch and a heavier impact: louder detonation plus the atomic bomb's
+      aftershock rumble.
 Version: 0.1.1
 Date: 2026-10-16
   Changes:

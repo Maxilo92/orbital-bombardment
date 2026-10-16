@@ -15,7 +15,8 @@ the planet below, mark a target - and a tungsten rod comes down on it from space
 
 A marked target waits in a queue until a cannon over that planet is loaded and ready; the marker
 says what it is waiting for. Once fired, the ground shows a red target circle and a five second
-countdown - then the rod falls out of the sky, trailing fire, and hits.
+countdown - then the rod comes down from orbit faster than the eye can follow, leaving a white-hot
+streak from the sky to ground zero, and hits.
 
 Targets have to be in charted territory: you can only hit what your radars can see.
 

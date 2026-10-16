@@ -1,10 +1,13 @@
 {
   "name": "orbital-bombardment",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "Orbital Bombardment",
   "author": "Maxilo",
   "factorio_version": "2.1",
-  "dependencies": ["base >= 2.0.0", "space-age >= 2.0.0"],
+  "dependencies": [
+    "base >= 2.0.0",
+    "space-age >= 2.0.0"
+  ],
   "description": "An orbital cannon for your space platforms. While the platform is parked in orbit, mark targets anywhere on the planet below from remote view and tungsten penetrators come down on them from space.",
   "thumbnail": "thumbnail.png"
 }

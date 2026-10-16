@@ -12,8 +12,8 @@ shared.AMMO = {
 }
 
 shared.FLIGHT_TICKS = 300  -- firing to impact: the warning countdown on the ground
-shared.FALL_TICKS = 50     -- the last part of that, in which the rod is visible
-shared.FALL_HEIGHT = 60    -- tiles above the target the rod appears at
+shared.FALL_TICKS = 10     -- the last part of that: the rod covers FALL_HEIGHT in a sixth of a second
+shared.FALL_HEIGHT = 100   -- tiles above the target the rod starts its visible fall
 shared.RELOAD_TICKS = 600  -- per cannon
 shared.MAX_QUEUE = 40      -- marked targets waiting per force and planet
 

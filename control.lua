@@ -224,13 +224,19 @@ local function fire(cannon, target, tick)
     target.state = "inbound"
     target.strike = ammo.strike
     target.radius = ammo.radius
-    target.impact_tick = tick + shared.FLIGHT_TICKS
+    -- Impact lands on the processing grid, so the fall starts exactly
+    -- FALL_TICKS before it and the map flash goes off on the impact tick.
+    target.impact_tick = math.ceil((tick + shared.FLIGHT_TICKS) / UPDATE_INTERVAL) * UPDATE_INTERVAL
     draw_markers(target, tick)
 end
 
--- The rod appears FALL_HEIGHT tiles north of the target and drops straight down
--- the screen, arriving FALL_TICKS later.
-local function spawn_rod(target, surface)
+-- The rod covers FALL_HEIGHT tiles in FALL_TICKS - far too fast to see as an
+-- object. What is seen is the streak explosion, whose head reaches the ground
+-- in the same ten ticks. Neither is drawn on the map, so the streak is drawn
+-- there as well (render_mode "chart"), started on its first frame.
+local STREAK_SPEED, STREAK_FRAMES = 0.4, 16 -- as in prototypes/strike.lua
+
+local function spawn_rod(target, surface, tick)
     local position = target.position
     surface.create_entity{
         name = target.strike,
@@ -239,8 +245,34 @@ local function spawn_rod(target, surface)
         speed = shared.FALL_HEIGHT / shared.FALL_TICKS,
         force = game.forces[target.force_index],
     }
+    surface.create_entity{name = "orbital-reentry-streak", position = position}
+    rendering.draw_animation{
+        animation = "orbital-reentry-streak-chart",
+        target = position,
+        surface = surface,
+        render_mode = "chart",
+        animation_speed = STREAK_SPEED,
+        animation_offset = -(tick * STREAK_SPEED) % STREAK_FRAMES,
+        time_to_live = math.floor(STREAK_FRAMES / STREAK_SPEED),
+    }
     surface.play_sound{path = "orbital-sonic-boom", position = position}
     target.fall_spawned = true
+end
+
+-- The blast on the map: the strike circle flares up and fades.
+local function flash_on_map(target, surface)
+    for i, alpha in ipairs({0.9, 0.45, 0.2}) do
+        rendering.draw_circle{
+            color = {r = alpha, g = alpha * 0.55, b = alpha * 0.15, a = alpha},
+            radius = target.radius,
+            filled = true,
+            target = target.position,
+            surface = surface,
+            render_mode = "chart",
+            time_to_live = 15 * i,
+        }
+    end
+    target.flashed = true
 end
 
 -- Queued targets fire oldest first, one per ready cannon.
@@ -272,7 +304,10 @@ local function process_targets(tick)
                 target.sound_played = true
             end
             if not target.fall_spawned and tick >= target.impact_tick - shared.FALL_TICKS then
-                spawn_rod(target, surface)
+                spawn_rod(target, surface, tick)
+            end
+            if target.fall_spawned and not target.flashed and tick >= target.impact_tick then
+                flash_on_map(target, surface)
             end
             if tick >= target.impact_tick + UPDATE_INTERVAL then
                 destroy_markers(target)

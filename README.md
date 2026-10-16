@@ -37,6 +37,9 @@ unit. Two per rocket.
 **Tungsten penetrator** - 10 tungsten plate, 4 tungsten carbide, 1 low density structure, 1
 processing unit. Twenty per rocket.
 
+**Tungsten slug** - 10 tungsten plate. Twenty-five per rocket. 25,000 physical within 1.5 tiles,
+little else: the precision round against single targets.
+
 ## For other mods
 
 ```lua

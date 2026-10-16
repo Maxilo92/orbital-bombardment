@@ -41,3 +41,25 @@ local recipe = {
 }
 
 data:extend({penetrator, recipe})
+
+-- Tungsten slug: a plain cast bar. Cheap, and almost no blast - the whole
+-- impact goes into whatever it hits. The sniper shot of the two rounds.
+local slug = table.deepcopy(penetrator)
+slug.name = "tungsten-slug"
+slug.icons = {{icon = "__space-age__/graphics/icons/tungsten-plate.png", tint = {r = 0.85, g = 0.88, b = 1}}}
+slug.order = "d[explosive-cannon-shell]-e[orbital]-b[tungsten-slug]"
+slug.stack_size = 20
+slug.weight = 40 * kg -- twenty-five per rocket
+
+local slug_recipe = {
+    type = "recipe",
+    name = "tungsten-slug",
+    enabled = false,
+    energy_required = 5,
+    ingredients = {
+        {type = "item", name = "tungsten-plate", amount = 10},
+    },
+    results = {{type = "item", name = "tungsten-slug", amount = 1}},
+}
+
+data:extend({slug, slug_recipe})

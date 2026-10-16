@@ -11,6 +11,7 @@ data:extend({
         effects = {
             {type = "unlock-recipe", recipe = shared.CANNON},
             {type = "unlock-recipe", recipe = "tungsten-penetrator"},
+            {type = "unlock-recipe", recipe = "tungsten-slug"},
         },
         unit = {
             count = 2000,

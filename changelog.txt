@@ -1,4 +1,16 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.3.0
+  Features:
+    - Tungsten slug: a plain cast tungsten bar as a second, cheap round (10 tungsten plate). It has
+      almost no blast, but whatever it hits takes 25,000 damage - a behemoth worm dies to one slug
+      while a nest five tiles away only loses half its health. The splinters fly as before.
+  Bugfixes:
+    - The re-entry streak on the map and minimap ran 100-200 ms behind the real one. The map
+      animation's own speed now no longer slows down the speed it is drawn with.
+  Graphics:
+    - The penetrator's dust ring is tighter: smaller, shorter-lived dust puffs, a third fewer of
+      them, and the shockwave no longer rolls on far past the blast radius.
+---------------------------------------------------------------------------------------------------
 Version: 0.2.1
 Date: 2026-10-17
   Changes:

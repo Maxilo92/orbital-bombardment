@@ -128,15 +128,22 @@ local function braking(projectile, acceleration)
     projectile.acceleration = acceleration
     return projectile
 end
+-- A tighter, shorter-lived dust puff than the atomic bomb's: the ring should
+-- mark the blast radius, not roll on far past it.
+local dust = table.deepcopy(data.raw["explosion"]["cluster-nuke-explosion"])
+dust.name = "orbital-impact-dust"
+scale_all(dust.animations, 0.75)
+dust.scale_increment_per_tick = 0.001
+dust.fade_out_duration = 20
 local p_dust = braking(wave_projectile("orbital-wave-dust", "atomic-bomb-wave-spawns-cluster-nuke-explosion",
-    {type = "create-entity", entity_name = "cluster-nuke-explosion"}), -0.03)
+    {type = "create-entity", entity_name = dust.name}), -0.035)
 local p_fire = braking(wave_projectile("orbital-wave-fire", "atomic-bomb-wave-spawns-fire-smoke-explosion",
     {type = "create-explosion", entity_name = "atomic-fire-smoke",
-     max_movement_distance = 7, max_movement_distance_deviation = 1,
+     max_movement_distance = 4, max_movement_distance_deviation = 1,
      inherit_movement_distance_from_projectile = true, cycle_while_moving = true}), -0.03)
 local p_shock = braking(wave_projectile("orbital-wave-shockwave", "atomic-bomb-wave-spawns-nuke-shockwave-explosion",
     {type = "create-explosion", entity_name = "atomic-nuke-shockwave",
-     max_movement_distance = 10, max_movement_distance_deviation = 1,
+     max_movement_distance = 4, max_movement_distance_deviation = 1,
      inherit_movement_distance_from_projectile = true, cycle_while_moving = true}), -0.04)
 
 -- Secondary fireballs going off around ground zero over the first fifth of a
@@ -147,7 +154,7 @@ burst.delay = 0
 burst.delay_deviation = 12
 scale_all(burst.animations, 1.3)
 
-data:extend({flash, p_dust, p_fire, p_shock, burst})
+data:extend({flash, dust, p_dust, p_fire, p_shock, burst})
 
 --------------------------------------------------------------------------------
 -- the fall
@@ -181,11 +188,15 @@ local streak = {
     light_size_factor_final = 0.5,
 }
 -- The same streak for the map and minimap, where entities are not drawn;
--- control.lua draws it there with rendering.draw_animation.
+-- control.lua draws it there with rendering.draw_animation and sets the speed
+-- itself. The prototype's own speed is 1 so it cannot slow that down: with
+-- 0.4 here the map streak ran late (reported in 0.2.0), consistent with the
+-- engine multiplying both speeds.
 local streak_chart = table.deepcopy(streak_animation)
 streak_chart.type = "animation"
 streak_chart.name = "orbital-reentry-streak-chart"
 streak_chart.draw_as_glow = nil
+streak_chart.animation_speed = 1
 
 data:extend({streak, streak_chart})
 
@@ -244,9 +255,9 @@ local rod = {
                 -- The blast around it is still enough for a fully evolved nest
                 -- (3500 HP, 15% physical resistance) or a behemoth worm.
                 area_damage(radius, {{amount = 3000, type = "explosion"}, {amount = 1500, type = "physical"}}),
-                wave(p_dust.name, 260, radius, 0.9),
-                wave(p_fire.name, 120, 2, 0.8),
-                wave(p_shock.name, 300, 3, 1.0),
+                wave(p_dust.name, 170, radius, 0.9),
+                wave(p_fire.name, 80, 2, 0.8),
+                wave(p_shock.name, 200, 3, 1.0),
                 -- The crater keeps smouldering for a while.
                 {type = "nested-result", action = {
                     type = "area", target_entities = false, trigger_from_target = true,
@@ -262,3 +273,49 @@ local rod = {
 }
 
 data:extend({rod})
+
+--------------------------------------------------------------------------------
+-- the slug
+--------------------------------------------------------------------------------
+
+local slug_radius = shared.AMMO["tungsten-slug"].radius
+
+local slug_flash = table.deepcopy(data.raw["explosion"]["big-explosion"])
+slug_flash.name = "orbital-slug-flash"
+slug_flash.light = {intensity = 1, size = 20, color = {r = 1, g = 0.85, b = 0.65}}
+slug_flash.light_intensity_factor_final = 0
+slug_flash.light_size_factor_final = 0.6
+
+-- Same fall as the penetrator; a pinpoint hit with the splinters but without
+-- the dust ring and the fireballs.
+local slug_rod = table.deepcopy(rod)
+slug_rod.name = "orbital-slug-strike"
+slug_rod.light = {intensity = 1, size = 12, color = {r = 1, g = 0.85, b = 0.7}}
+slug_rod.action.action_delivery.target_effects = {
+    {type = "create-entity", entity_name = slug_flash.name},
+    {type = "create-entity", entity_name = "medium-scorchmark", offsets = {{0, -0.5}}},
+    {type = "destroy-decoratives", radius = slug_radius, include_soft_decoratives = true,
+     include_decals = true, invoke_decorative_trigger = true, decoratives_with_trigger_only = false},
+    {type = "invoke-tile-trigger", repeat_count = 1},
+    {type = "create-particle", particle_name = "stone-particle-big", repeat_count = 20,
+     initial_height = 0.5, initial_vertical_speed = 0.28, initial_vertical_speed_deviation = 0.12,
+     speed_from_center = 0.3, speed_from_center_deviation = 0.15, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 6, tail_length_deviation = 4, tail_width = 3, only_when_visible = true},
+    {type = "create-particle", particle_name = "stone-particle-medium", repeat_count = 60,
+     initial_height = 0.4, initial_vertical_speed = 0.22, initial_vertical_speed_deviation = 0.12,
+     speed_from_center = 0.4, speed_from_center_deviation = 0.2, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 10, tail_length_deviation = 6, tail_width = 2, only_when_visible = true},
+    {type = "create-particle", particle_name = "spark-particle-debris", repeat_count = 50,
+     initial_height = 0.6, initial_vertical_speed = 0.25, initial_vertical_speed_deviation = 0.15,
+     speed_from_center = 0.5, speed_from_center_deviation = 0.3, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 12, tail_length_deviation = 6, tail_width = 2, only_when_visible = true},
+    {type = "camera-effect", duration = 20, ease_in_duration = 1, ease_out_duration = 30, delay = 0,
+     strength = 3, full_strength_max_distance = 30, max_distance = 150},
+    {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
+    -- Whatever is hit takes the whole impact.
+    area_damage(1.5, {{amount = 25000, type = "physical"}}),
+    area_damage(slug_radius, {{amount = 1500, type = "physical"}, {amount = 500, type = "explosion"}}),
+    wave(p_dust.name, 40, 3, 0.6),
+}
+
+data:extend({slug_flash, slug_rod})

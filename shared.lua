@@ -9,6 +9,7 @@ shared.TECHNOLOGY = "orbital-bombardment"
 -- entry here; the strike radius is what the target marker draws.
 shared.AMMO = {
     ["tungsten-penetrator"] = {strike = "orbital-penetrator-strike", radius = 10},
+    ["tungsten-slug"] = {strike = "orbital-slug-strike", radius = 4},
 }
 
 shared.FLIGHT_TICKS = 300  -- firing to impact: the warning countdown on the ground

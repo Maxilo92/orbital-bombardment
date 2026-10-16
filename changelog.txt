@@ -1,0 +1,28 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.1.1
+Date: 2026-10-16
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.1.0, which is the Factorio 2.1 release.
+---------------------------------------------------------------------------------------------------
+Version: 0.1.0
+Date: 2026-10-16
+  Major Features:
+    - Orbital cannon: a gun for space platforms only. While its platform is parked in orbit of a
+      planet, it fires at targets marked anywhere on that planet.
+    - Orbital strike designator, from the shortcut bar: in remote view of the planet, click or drag
+      to mark a target (the strike lands in the middle of the box); shift + right click or drag
+      cancels targets that have not been fired yet. Targets must be in charted territory.
+    - Tungsten penetrator: a kinetic round made from Vulcanus tungsten. It destroys anything at
+      ground zero, deals enough blast damage within 10 tiles to destroy a fully evolved nest or
+      behemoth worm, levels cliffs and leaves a crater.
+  Features:
+    - Marked targets wait in a queue and are fired oldest first, one per ready cannon. Each marker
+      shows why it is waiting: no cannon in orbit, no ammo, or reloading.
+    - A fired strike is announced on the ground with a red target circle, a blinking bullseye and a
+      five second countdown, visible to your force only, on the map as well.
+    - The impact: the cannon fires with a railgun crack and muzzle flash on the platform, then a
+      white-hot rod with a fiery trail falls out of the sky with a sonic boom and a re-entry roar,
+      and hits in a flash, a shockwave and a ring of dust.
+    - A status panel next to the cannon's window shows its orbit, ammo or reload time and the
+      targets waiting for its planet.
+    - Every refusal says why: not a planet, uncharted area, no cannon in orbit, queue full.

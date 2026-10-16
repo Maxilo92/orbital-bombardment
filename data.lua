@@ -1,0 +1,5 @@
+require("prototypes.cannon")
+require("prototypes.ammo")
+require("prototypes.strike")
+require("prototypes.designator")
+require("prototypes.technology")

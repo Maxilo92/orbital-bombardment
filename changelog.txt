@@ -1,4 +1,31 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.8.1
+Date: 2026-10-17
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.8.0, which is the Factorio 2.1 release.
+---------------------------------------------------------------------------------------------------
+Version: 0.8.0
+Date: 2026-10-17
+  Major Features:
+    - Fire control, from the new research Orbital fire control: each cannon can pick its own targets.
+      Set it up in the panel next to the cannon's window - mode, round and a reserve of rounds kept
+      for your own targets. Shift + right/left click copies the settings between cannons.
+      * Defend: when enemies attack your buildings, the cannon strikes them. The aim is moved out in
+        front of the buildings until the round cannot reach anything of yours, so a wall under attack
+        is never hit by its own defence - the EMP rod and the slug can strike closest.
+      * Clear: the cannon takes out the enemy nests inside your pollution cloud - the ones the attacks
+        come from - most polluted first, on charted ground only and never next to your buildings.
+      * Your own targets always go before the fire control's.
+    - Area clearing: drag the designator over an area instead of clicking. Every enemy in it is
+      found and the strikes plan themselves - as few as the chosen round needs to cover them all,
+      nests and worms first, one guided rod per enemy. Strikes that would hit your own buildings are
+      left out and reported.
+  Features:
+    - Steel rod: five steel plates, nothing else - the round a platform can make for itself from
+      asteroid iron, so fire control can run without supply rockets. 5 s to impact, 6 s reload,
+      radius 5, 4,000 on the point and 1,800 around it. New cannons' fire control starts on it.
+  Minor Features:
+    - The remote interface gained order_area and set_auto.
 Version: 0.7.1
 Date: 2026-10-17
   Changes:

@@ -642,3 +642,35 @@ guided_rod.action.action_delivery.target_effects = with(crater(2.5, "big-scorchm
 })
 
 data:extend({guided_rod})
+
+--------------------------------------------------------------------------------
+-- the steel rod
+--------------------------------------------------------------------------------
+
+-- A small kinetic hit: enough for units and worms, two of them for a fully
+-- evolved nest. Its mark is a small crater.
+local steel_radius = shared.AMMO["orbital-steel-rod"].radius
+local steel_rod = table.deepcopy(rod)
+steel_rod.name = "orbital-steel-strike"
+steel_rod.light = {intensity = 0.8, size = 12, color = {r = 1, g = 0.85, b = 0.7}}
+steel_rod.action.action_delivery.target_effects = with(crater(1.8, "medium-scorchmark", "crater-small"), {
+    {type = "create-entity", entity_name = slug_flash.name},
+    {type = "create-entity", entity_name = burst.name},
+    {type = "invoke-tile-trigger", repeat_count = 1},
+    {type = "create-particle", particle_name = "stone-particle-medium", repeat_count = 40,
+     initial_height = 0.4, initial_vertical_speed = 0.2, initial_vertical_speed_deviation = 0.1,
+     speed_from_center = 0.35, speed_from_center_deviation = 0.2, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 8, tail_length_deviation = 4, tail_width = 2, only_when_visible = true},
+    {type = "create-particle", particle_name = "spark-particle-debris", repeat_count = 25,
+     initial_height = 0.6, initial_vertical_speed = 0.22, initial_vertical_speed_deviation = 0.12,
+     speed_from_center = 0.45, speed_from_center_deviation = 0.25, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 10, tail_length_deviation = 5, tail_width = 2, only_when_visible = true},
+    {type = "camera-effect", duration = 15, ease_in_duration = 1, ease_out_duration = 20, delay = 0,
+     strength = 2, full_strength_max_distance = 30, max_distance = 150},
+    {type = "play-sound", sound = sounds.large_explosion(0.8), play_on_target_position = true, max_distance = 300},
+    area_damage(2, {{amount = 4000, type = "physical"}}),
+    area_damage(steel_radius, {{amount = 1200, type = "explosion"}, {amount = 600, type = "physical"}}),
+    wave(p_dust.name, 40, 4, 0.7),
+})
+
+data:extend({steel_rod})

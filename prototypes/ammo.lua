@@ -167,3 +167,26 @@ local guided_recipe = {
 }
 
 data:extend({guided, guided_recipe})
+
+-- Steel rod: plain steel, nothing else - the one round a platform can make
+-- for itself from asteroid iron, so fire control can run without supply
+-- rockets. Weak next to the tungsten rounds.
+local steel = table.deepcopy(penetrator)
+steel.name = "orbital-steel-rod"
+steel.icons = {{icon = "__space-age__/graphics/icons/railgun-ammo.png", tint = {r = 0.62, g = 0.64, b = 0.68}}}
+steel.order = "d[explosive-cannon-shell]-e[orbital]-0[steel-rod]"
+steel.stack_size = 20
+steel.weight = 25 * kg
+
+local steel_recipe = {
+    type = "recipe",
+    name = "orbital-steel-rod",
+    enabled = false,
+    energy_required = 4,
+    ingredients = {
+        {type = "item", name = "steel-plate", amount = 5},
+    },
+    results = {{type = "item", name = "orbital-steel-rod", amount = 1}},
+}
+
+data:extend({steel, steel_recipe})

@@ -32,6 +32,15 @@ local TEXT_INBOUND = {r = 1, g = 0.35, b = 0.25}
 -- storage.scheduled  array of things to do on a given tick, {tick, kind, ...}:
 --                    "fall" (a bomblet), "emp", "napalm" and "enable" (an
 --                    entity the EMP switched off)
+-- storage.threats    [force_index][surface_index] = array of {position, from, tick}:
+--                    recent enemy attacks on the force's buildings (defence mode)
+-- storage.defending  [force_index] = true while one of its cannons defends
+-- storage.nests      [surface_index] = {tick, list}: enemy spawners, refreshed
+--                    every minute (clearing mode)
+-- storage.ignore_chart  tests only: the headless benchmark never charts
+--
+-- Each cannon also carries `auto` = {mode = "off" | "defend" | "clear", ammo,
+-- reserve, status}: its fire-control settings.
 local function init_storage()
     storage.cannons = storage.cannons or {}
     storage.targets = storage.targets or {}
@@ -40,15 +49,25 @@ local function init_storage()
     storage.selectors = storage.selectors or {}
     storage.rng = storage.rng or game.create_random_generator()
     storage.scheduled = storage.scheduled or {}
+    storage.threats = storage.threats or {}
+    storage.defending = storage.defending or {}
+    storage.nests = storage.nests or {}
+    for _, cannon in pairs(storage.cannons) do
+        cannon.auto = cannon.auto or {mode = "off", ammo = shared.AUTO_DEFAULT_AMMO, reserve = 2}
+    end
     -- Targets from 0.3 and earlier knew only one round.
     for _, target in pairs(storage.targets) do
-        target.ammo = target.ammo or shared.AMMO_ORDER[1]
+        target.ammo = target.ammo or "tungsten-penetrator"
     end
 end
 
 local function register(entity)
     if entity and entity.valid and entity.name == CANNON and not storage.cannons[entity.unit_number] then
-        storage.cannons[entity.unit_number] = {entity = entity, ready_tick = 0}
+        storage.cannons[entity.unit_number] = {
+            entity = entity,
+            ready_tick = 0,
+            auto = {mode = "off", ammo = shared.AUTO_DEFAULT_AMMO, reserve = 2},
+        }
     end
 end
 
@@ -91,14 +110,16 @@ local function ammo_stack(entity, ammo)
 end
 
 -- A cannon of `force` parked over `planet` that can fire `ammo` right now, or
--- nil and the reason none can: "no-cannon", "no-ammo" or "reloading".
-local function pick_cannon(force_index, planet, ammo, tick)
+-- nil and the reason none can: "no-cannon", "no-ammo" or "reloading". A target
+-- the fire control picked for one cannon is only fired by that cannon.
+local function pick_cannon(force_index, planet, ammo, tick, target)
     local reason = "no-cannon"
+    local only = target and target.cannon_id
     for id, cannon in pairs(storage.cannons) do
         local entity = cannon.entity
         if not entity.valid then
             storage.cannons[id] = nil
-        elseif entity.force.index == force_index and orbit_of(entity) == planet then
+        elseif entity.force.index == force_index and orbit_of(entity) == planet and (not only or only == id) then
             if not ammo_stack(entity, ammo) then
                 if reason == "no-cannon" then reason = "no-ammo" end
             elseif cannon.ready_tick > tick then
@@ -185,6 +206,10 @@ local function update_label(target, tick)
         key = "q" .. target.reason
         text = {"orbital-bombardment.marker-queued",
             {"orbital-bombardment.reason-" .. target.reason, "[item=" .. target.ammo .. "]"}}
+    end
+    if target.auto then
+        key = "auto" .. key
+        text = {"orbital-bombardment.marker-auto", {"orbital-bombardment.auto-mode-" .. target.auto.mode}, text}
     end
     if key ~= target.label_key then
         label.text = text
@@ -534,16 +559,20 @@ local function flash_on_map(target, surface)
     target.flashed = true
 end
 
--- Queued targets fire oldest first, one per ready cannon.
+-- Queued targets fire oldest first, one per ready cannon - the player's own
+-- targets before any the fire control picked.
 local function fire_queued(tick)
-    for _, target in ipairs(storage.targets) do
-        if target.state == "queued" then
-            local cannon, reason = pick_cannon(target.force_index, target.planet, target.ammo, tick)
-            if cannon then
-                fire(cannon, target, tick)
-            elseif reason ~= target.reason then
-                target.reason = reason
-                update_label(target, tick)
+    for pass = 1, 2 do
+        local want_auto = pass == 2
+        for _, target in ipairs(storage.targets) do
+            if target.state == "queued" and (target.auto ~= nil) == want_auto then
+                local cannon, reason = pick_cannon(target.force_index, target.planet, target.ammo, tick, target)
+                if cannon then
+                    fire(cannon, target, tick)
+                elseif reason ~= target.reason then
+                    target.reason = reason
+                    update_label(target, tick)
+                end
             end
         end
     end
@@ -584,7 +613,12 @@ local function process_targets(tick)
     for i = #targets, 1, -1 do
         local target = targets[i]
         local surface = game.surfaces[target.surface_index]
-        if target.entity and target.state == "queued" and not target.entity.valid then
+        if target.auto and target.state == "queued" and tick - (target.created or tick) > shared.AUTO_STALE_TICKS then
+            -- The fire control's pick went stale (its cannon left orbit or ran
+            -- dry in the meantime); it will pick afresh.
+            destroy_markers(target)
+            table.remove(targets, i)
+        elseif target.entity and target.state == "queued" and not target.entity.valid then
             -- The enemy died before any cannon could fire at it: nothing to hit.
             destroy_markers(target)
             table.remove(targets, i)
@@ -646,7 +680,7 @@ end
 -- Queues a strike with `ammo`. Returns the target, or nil and a localised
 -- reason why not. `ignore_chart` exists for headless tests only: the benchmark
 -- mode they run in never charts anything.
-local function order_strike(force, surface, position, tick, ammo, ignore_chart)
+local function order_strike(force, surface, position, tick, ammo, ignore_chart, auto)
     if not shared.AMMO[ammo] then
         return nil, {"orbital-bombardment.error-unknown-ammo"}
     end
@@ -658,7 +692,7 @@ local function order_strike(force, surface, position, tick, ammo, ignore_chart)
         return nil, {"orbital-bombardment.error-no-planet"}
     end
     local chunk = {x = math.floor(position.x / 32), y = math.floor(position.y / 32)}
-    if not ignore_chart and not force.is_chunk_charted(surface, chunk) then
+    if not (ignore_chart or storage.ignore_chart) and not force.is_chunk_charted(surface, chunk) then
         return nil, {"orbital-bombardment.error-uncharted"}
     end
     if not has_cannon_over(force.index, planet.name) then
@@ -674,7 +708,7 @@ local function order_strike(force, surface, position, tick, ammo, ignore_chart)
     end
     local queued = 0
     for _, other in pairs(storage.targets) do
-        if other.force_index == force.index and other.planet == planet.name and other.state == "queued" then
+        if other.force_index == force.index and other.planet == planet.name and other.state == "queued" and not other.auto then
             queued = queued + 1
         end
     end
@@ -693,6 +727,9 @@ local function order_strike(force, surface, position, tick, ammo, ignore_chart)
         radius = shared.AMMO[ammo].radius,
         objects = {},
         entity = followed,
+        auto = auto,
+        cannon_id = auto and auto.cannon_id,
+        created = tick,
     }
     storage.targets[#storage.targets + 1] = target
     draw_markers(target, tick)
@@ -700,6 +737,283 @@ local function order_strike(force, surface, position, tick, ammo, ignore_chart)
     -- pass - but through the queue, so older targets still go first.
     fire_queued(tick)
     return target
+end
+
+--------------------------------------------------------------------------------
+-- fire control: the cannon picking its own targets
+--------------------------------------------------------------------------------
+
+local AUTO_MODES = {"off", "defend", "clear"}
+local THREAT_TICKS = 10 * 60
+local NEST_REFRESH_TICKS = 60 * 60
+
+local function fire_control_researched(force)
+    local tech = force.technologies[shared.FIRE_CONTROL]
+    return tech ~= nil and tech.researched
+end
+
+-- How far from the force's own buildings a round may land. The EMP only
+-- harms enemies; everything else hurts whatever is in its circle, the cluster
+-- rod's bomblets landing anywhere in their spread.
+local function safety_radius(ammo)
+    local data = shared.AMMO[ammo]
+    if data.emp then return 3 end
+    return (data.spread or data.radius) + 2
+end
+
+local function own_near(surface, force, position, radius)
+    return surface.count_entities_filtered{position = position, radius = radius, force = force, limit = 1} > 0
+end
+
+local HOSTILE_TYPES = {"unit", "spider-unit", "segmented-unit", "unit-spawner", "turret"}
+
+local function enemies_near(surface, force, position, radius)
+    for _, entity in pairs(surface.find_entities_filtered{position = position, radius = radius, type = HOSTILE_TYPES}) do
+        if force.is_enemy(entity.force) then return true end
+    end
+    return false
+end
+
+local function already_targeted(force_index, surface_index, position, radius)
+    for _, target in pairs(storage.targets) do
+        if target.force_index == force_index and target.surface_index == surface_index then
+            local dx, dy = target.position.x - position.x, target.position.y - position.y
+            if dx * dx + dy * dy < radius * radius then return true end
+        end
+    end
+    return false
+end
+
+-- Defence: the most recent attack on the force's buildings. The aim starts on
+-- the attacker and steps away from the building it hit until the round would
+-- no longer reach anything of the force's own - a barrage in front of the
+-- walls, not on them.
+local function defend_target(force, surface, ammo, tick)
+    local per_force = storage.threats[force.index]
+    local list = per_force and per_force[surface.index]
+    if not list then return nil end
+    local safe, radius = safety_radius(ammo), shared.AMMO[ammo].radius
+    for i = #list, 1, -1 do
+        local threat = list[i]
+        if tick - threat.tick > THREAT_TICKS then
+            table.remove(list, i)
+        else
+            local dx, dy = threat.position.x - threat.from.x, threat.position.y - threat.from.y
+            local length = math.sqrt(dx * dx + dy * dy)
+            if length < 0.1 then dx, dy, length = 0, -1, 1 end
+            dx, dy = dx / length, dy / length
+            for step = 0, shared.AUTO_MAX_STEP_OUT, 2 do
+                local aim = {x = threat.position.x + dx * step, y = threat.position.y + dy * step}
+                if not own_near(surface, force, aim, safe) then
+                    -- The attackers may be dead or gone by now: only fire
+                    -- where enemies still are.
+                    if enemies_near(surface, force, aim, radius + 4)
+                        and not already_targeted(force.index, surface.index, aim, radius) then
+                        table.remove(list, i)
+                        return aim
+                    end
+                    break
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- Clearing: the enemy nest in the thickest of the force's pollution - the ones
+-- the attacks come from. Charted ground only, nothing next to own buildings.
+local function clear_target(force, surface, ammo, tick)
+    local cache = storage.nests[surface.index]
+    if not cache or tick - cache.tick > NEST_REFRESH_TICKS then
+        cache = {tick = tick, list = surface.find_entities_filtered{type = "unit-spawner"}}
+        storage.nests[surface.index] = cache
+    end
+    local safe, radius = safety_radius(ammo), shared.AMMO[ammo].radius
+    local best, best_pollution
+    for _, nest in pairs(cache.list) do
+        if nest.valid and force.is_enemy(nest.force) then
+            local p = nest.position
+            local pollution = surface.get_pollution(p)
+            if pollution > 0 and (not best or pollution > best_pollution)
+                and (storage.ignore_chart or force.is_chunk_charted(surface, {x = math.floor(p.x / 32), y = math.floor(p.y / 32)}))
+                and not already_targeted(force.index, surface.index, p, radius)
+                and not own_near(surface, force, p, safe) then
+                best, best_pollution = nest, pollution
+            end
+        end
+    end
+    return best and best.position
+end
+
+local function pending_auto(cannon_id)
+    for _, target in pairs(storage.targets) do
+        if target.cannon_id == cannon_id and target.state == "queued" then return true end
+    end
+    return false
+end
+
+-- Which forces need attacks on their buildings recorded. The damage event is
+-- only listened to while at least one cannon defends.
+local DAMAGE_FILTER = {}
+for _, excluded in ipairs({"unit", "unit-spawner", "turret", "spider-unit", "segmented-unit", "segment",
+    "tree", "simple-entity", "fish", "asteroid", "plant"}) do
+    DAMAGE_FILTER[#DAMAGE_FILTER + 1] = {filter = "type", type = excluded, invert = true, mode = "and"}
+end
+
+local function on_damaged(event)
+    local cause, entity = event.cause, event.entity
+    if not (cause and cause.valid and entity.valid) then return end
+    local force = entity.force
+    if not storage.defending[force.index] or not force.is_enemy(cause.force) then return end
+    local per_force = storage.threats[force.index] or {}
+    storage.threats[force.index] = per_force
+    local list = per_force[entity.surface.index] or {}
+    per_force[entity.surface.index] = list
+    local position = cause.position
+    for _, threat in pairs(list) do
+        local dx, dy = threat.position.x - position.x, threat.position.y - position.y
+        if dx * dx + dy * dy < 64 then
+            threat.position, threat.from, threat.tick = position, entity.position, event.tick
+            return
+        end
+    end
+    if #list >= 20 then table.remove(list, 1) end
+    list[#list + 1] = {position = position, from = entity.position, tick = event.tick}
+end
+
+local function update_damage_handler()
+    if next(storage.defending or {}) then
+        script.on_event(defines.events.on_entity_damaged, on_damaged, DAMAGE_FILTER)
+    else
+        script.on_event(defines.events.on_entity_damaged, nil)
+    end
+end
+
+local function refresh_defending()
+    local defending = {}
+    for _, cannon in pairs(storage.cannons) do
+        if cannon.entity.valid and cannon.auto and cannon.auto.mode == "defend" then
+            defending[cannon.entity.force.index] = true
+        end
+    end
+    storage.defending = defending
+    update_damage_handler()
+end
+
+-- Once a second: every cannon on fire control that is ready, has rounds above
+-- its reserve and no pick of its own waiting, picks a target.
+local function run_fire_control(tick)
+    for id, cannon in pairs(storage.cannons) do
+        local entity, auto = cannon.entity, cannon.auto
+        if entity.valid and auto and auto.mode ~= "off" then
+            local force = entity.force
+            local planet_name = orbit_of(entity)
+            local planet = planet_name and game.planets[planet_name]
+            local surface = planet and planet.surface
+            local loaded = shared.count_ammo(ammo_inventory(entity))[auto.ammo] or 0
+            if not fire_control_researched(force) then
+                auto.status = "locked"
+            elseif not surface then
+                auto.status = "no-orbit"
+            elseif loaded <= auto.reserve then
+                auto.status = "reserve"
+            elseif not is_unlocked(force, auto.ammo) then
+                auto.status = "ammo-locked"
+            elseif cannon.ready_tick > tick or pending_auto(id) then
+                auto.status = "busy"
+            else
+                local aim
+                if auto.mode == "defend" then
+                    aim = defend_target(force, surface, auto.ammo, tick)
+                else
+                    aim = clear_target(force, surface, auto.ammo, tick)
+                end
+                if aim then
+                    local target = order_strike(force, surface, aim, tick, auto.ammo, false, {cannon_id = id, mode = auto.mode})
+                    auto.status = target and "firing" or "idle-" .. auto.mode
+                else
+                    auto.status = "idle-" .. auto.mode
+                end
+            end
+        end
+    end
+end
+
+--------------------------------------------------------------------------------
+-- area clearing: drag the designator over an area, the strikes plan themselves
+--------------------------------------------------------------------------------
+
+-- Every enemy in the area is found, nests and worms weighing more than units.
+-- Then, greedily, the strike that covers the most uncovered weight is placed
+-- (on the middle of what it covers) until everything is covered. Guided rods
+-- get one rod per enemy. Strikes that would land on the force's own buildings
+-- are left out and counted.
+local function plan_area(force, surface, area, ammo, tick, ignore_chart)
+    local data = shared.AMMO[ammo]
+    if not data then return nil, {"orbital-bombardment.error-unknown-ammo"} end
+    local enemies = {}
+    for _, entity in pairs(surface.find_entities_filtered{area = area, type = HOSTILE_TYPES}) do
+        if force.is_enemy(entity.force) then
+            local static = entity.type == "unit-spawner" or entity.type == "turret"
+            enemies[#enemies + 1] = {position = entity.position, weight = static and 3 or 1}
+        end
+    end
+    if #enemies == 0 then
+        return nil, {"orbital-bombardment.area-empty"}
+    end
+
+    -- How far one strike reaches, for planning. A little inside the real
+    -- radius, since the strike is aimed at the middle of its group.
+    local reach = data.guided and 0.5 or (data.spread or data.radius) * 0.8
+    local reach2 = reach * reach
+    local function close(a, b)
+        local dx, dy = a.x - b.x, a.y - b.y
+        return dx * dx + dy * dy <= reach2
+    end
+
+    local covered, aims = {}, {}
+    while true do
+        local best, best_score
+        for i, enemy in ipairs(enemies) do
+            if not covered[i] then
+                local score = 0
+                for j, other in ipairs(enemies) do
+                    if not covered[j] and close(enemy.position, other.position) then score = score + other.weight end
+                end
+                if not best or score > best_score then best, best_score = i, score end
+            end
+        end
+        if not best then break end
+        local center = enemies[best].position
+        local x, y, n = 0, 0, 0
+        for j, other in ipairs(enemies) do
+            if not covered[j] and close(center, other.position) then
+                covered[j] = true
+                x, y, n = x + other.position.x, y + other.position.y, n + 1
+            end
+        end
+        aims[#aims + 1] = data.guided and center or {x = x / n, y = y / n}
+    end
+
+    local planned, skipped, full = 0, 0, false
+    local safe = safety_radius(ammo)
+    for _, aim in ipairs(aims) do
+        if own_near(surface, force, aim, safe) then
+            skipped = skipped + 1
+        else
+            local target, err = order_strike(force, surface, aim, tick, ammo, ignore_chart)
+            if target then
+                planned = planned + 1
+            elseif err and err[1] == "orbital-bombardment.error-queue-full" then
+                full = true
+                break
+            elseif planned == 0 and err and err[1] ~= "orbital-bombardment.error-no-guided-target"
+                and err[1] ~= "orbital-bombardment.error-uncharted" then
+                return nil, err -- no cannon, locked round, not a planet: says it all
+            end
+        end
+    end
+    return planned, {"orbital-bombardment.area-planned", planned, #enemies, skipped, full and 1 or 0}
 end
 
 local function area_center(area)
@@ -873,6 +1187,60 @@ local function status_lines(cannon, tick)
     return lines
 end
 
+-- The fire-control settings, below the status lines.
+local function build_auto_section(container, cannon, force)
+    container.clear()
+    container.add{type = "label", caption = {"orbital-bombardment.auto-title"}, style = "caption_label"}
+    if not fire_control_researched(force) then
+        local label = container.add{type = "label", caption = {"orbital-bombardment.auto-locked"}}
+        label.style.single_line = false
+        label.style.maximal_width = 260
+        return
+    end
+    local auto = cannon.auto
+    local id = cannon.entity.unit_number
+
+    local mode_row = container.add{type = "flow", direction = "horizontal"}
+    mode_row.style.vertical_align = "center"
+    mode_row.add{type = "label", caption = {"orbital-bombardment.auto-mode"}}
+    local items, selected = {}, 1
+    for i, mode in ipairs(AUTO_MODES) do
+        items[i] = {"orbital-bombardment.auto-mode-" .. mode}
+        if mode == auto.mode then selected = i end
+    end
+    mode_row.add{type = "drop-down", items = items, selected_index = selected, tags = {orbital_auto = "mode", cannon = id}}
+
+    container.add{type = "label", caption = {"orbital-bombardment.auto-ammo"}}
+    local buttons = container.add{type = "frame", style = "slot_button_deep_frame", direction = "horizontal"}
+    for _, ammo in ipairs(shared.AMMO_ORDER) do
+        if is_unlocked(force, ammo) then
+            buttons.add{
+                type = "sprite-button",
+                style = "slot_button",
+                sprite = "item/" .. ammo,
+                toggled = auto.ammo == ammo,
+                tooltip = {"", "[font=default-bold]", {"item-name." .. ammo}, "[/font]\n", ammo_stats(ammo)},
+                tags = {orbital_auto = "ammo", cannon = id, ammo = ammo},
+            }
+        end
+    end
+
+    local reserve_row = container.add{type = "flow", direction = "horizontal"}
+    reserve_row.style.vertical_align = "center"
+    reserve_row.add{type = "label", caption = {"orbital-bombardment.auto-reserve"}, tooltip = {"orbital-bombardment.auto-reserve-tooltip"}}
+    reserve_row.add{
+        type = "slider", style = "notched_slider",
+        minimum_value = 0, maximum_value = 10, value = auto.reserve, value_step = 1, discrete_values = true,
+        tags = {orbital_auto = "reserve", cannon = id},
+    }
+    reserve_row.add{type = "label", name = "reserve_value", caption = tostring(auto.reserve)}
+
+    local status = container.add{type = "label", name = "auto_status"}
+    status.style.single_line = false
+    status.style.maximal_width = 260
+    status.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
+end
+
 local function update_gui(player, tick)
     local frame = player.gui.relative[GUI_NAME]
     local cannon = storage.cannons[storage.guis[player.index] or 0]
@@ -882,6 +1250,11 @@ local function update_gui(player, tick)
     end
     for i, line in pairs(status_lines(cannon, tick)) do
         frame.inner["line" .. i].caption = line
+    end
+    local status = frame.auto and frame.auto.auto_status
+    if status then
+        local auto = cannon.auto
+        status.caption = auto.mode == "off" and "" or {"orbital-bombardment.auto-status-" .. (auto.status or "busy")}
     end
 end
 
@@ -907,8 +1280,22 @@ local function open_gui(player, entity, tick)
     hint.style.maximal_width = 260
     hint.style.top_margin = 8
     hint.style.font_color = {r = 0.7, g = 0.7, b = 0.7}
+    local auto = frame.add{type = "frame", name = "auto", style = "inside_shallow_frame_with_padding", direction = "vertical"}
+    auto.style.top_margin = 8
     storage.guis[player.index] = entity.unit_number
+    build_auto_section(auto, storage.cannons[entity.unit_number], player.force)
     update_gui(player, tick)
+end
+
+-- Rebuilds the fire-control section for everyone looking at this cannon.
+local function refresh_auto_guis(cannon_id)
+    for player_index, open_id in pairs(storage.guis) do
+        local player = game.get_player(player_index)
+        local frame = player and player.gui.relative[GUI_NAME]
+        if open_id == cannon_id and frame and frame.auto then
+            build_auto_section(frame.auto, storage.cannons[cannon_id], player.force)
+        end
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -918,11 +1305,22 @@ end
 script.on_init(function()
     init_storage()
     rescan_cannons()
+    refresh_defending()
 end)
 
 script.on_configuration_changed(function()
     init_storage()
     rescan_cannons()
+    refresh_defending()
+end)
+
+-- The damage listener is not saved; re-register it the way the save needs.
+script.on_load(function()
+    update_damage_handler()
+end)
+
+script.on_nth_tick(shared.AUTO_INTERVAL, function(event)
+    run_fire_control(event.tick)
 end)
 
 script.on_nth_tick(UPDATE_INTERVAL, function(event)
@@ -978,20 +1376,75 @@ end)
 
 script.on_event(defines.events.on_gui_click, function(event)
     local element = event.element
-    local ammo = element.valid and element.tags and element.tags.orbital_ammo
-    if not ammo then return end
+    local tags = element.valid and element.tags
+    if not tags then return end
     local player = game.get_player(event.player_index)
     if not player then return end
-    storage.selected[player.index] = ammo
-    update_selector(player)
+    if tags.orbital_ammo then
+        storage.selected[player.index] = tags.orbital_ammo
+        update_selector(player)
+    elseif tags.orbital_auto == "ammo" then
+        local cannon = storage.cannons[tags.cannon]
+        if cannon then
+            cannon.auto.ammo = tags.ammo
+            refresh_auto_guis(tags.cannon)
+        end
+    end
 end)
+
+script.on_event(defines.events.on_gui_selection_state_changed, function(event)
+    local element = event.element
+    local tags = element.valid and element.tags
+    if not (tags and tags.orbital_auto == "mode") then return end
+    local cannon = storage.cannons[tags.cannon]
+    if not cannon then return end
+    cannon.auto.mode = AUTO_MODES[element.selected_index] or "off"
+    cannon.auto.status = nil
+    refresh_defending()
+    refresh_auto_guis(tags.cannon)
+end)
+
+script.on_event(defines.events.on_gui_value_changed, function(event)
+    local element = event.element
+    local tags = element.valid and element.tags
+    if not (tags and tags.orbital_auto == "reserve") then return end
+    local cannon = storage.cannons[tags.cannon]
+    if not cannon then return end
+    cannon.auto.reserve = math.floor(element.slider_value + 0.5)
+    local value = element.parent.reserve_value
+    if value then value.caption = tostring(cannon.auto.reserve) end
+end)
+
+-- Shift + right/left click copies the fire-control settings between cannons,
+-- like any vanilla machine's settings.
+script.on_event(defines.events.on_entity_settings_pasted, function(event)
+    local source, destination = event.source, event.destination
+    if not (source.valid and destination.valid and source.name == CANNON and destination.name == CANNON) then return end
+    register(source)
+    register(destination)
+    local from = storage.cannons[source.unit_number].auto
+    storage.cannons[destination.unit_number].auto = {mode = from.mode, ammo = from.ammo, reserve = from.reserve}
+    refresh_defending()
+    refresh_auto_guis(destination.unit_number)
+end)
+
+-- A click marks one target; dragging a box clears everything in it.
+local CLICK_SIZE = 3
 
 script.on_event(defines.events.on_player_selected_area, function(event)
     if event.item ~= DESIGNATOR then return end
     local player = game.get_player(event.player_index)
     if not player then return end
-    local target, err = order_strike(player.force, event.surface, area_center(event.area), event.tick, selected_ammo(player))
-    if not target then notify(player, err) end
+    local area = event.area
+    local width = area.right_bottom.x - area.left_top.x
+    local height = area.right_bottom.y - area.left_top.y
+    if width < CLICK_SIZE and height < CLICK_SIZE then
+        local target, err = order_strike(player.force, event.surface, area_center(area), event.tick, selected_ammo(player))
+        if not target then notify(player, err) end
+    else
+        local planned, message = plan_area(player.force, event.surface, area, selected_ammo(player), event.tick)
+        notify(player, message)
+    end
     update_selector(player)
 end)
 
@@ -1027,7 +1480,7 @@ script.on_event(defines.events.on_gui_closed, function(event)
 end)
 
 -- For other mods and for tests: order a strike without a player.
--- options.ammo picks the round (default: the first in shared.AMMO_ORDER);
+-- options.ammo picks the round (default: the tungsten penetrator);
 -- options.ignore_chart skips the charted-area check (see order_strike).
 remote.add_interface("orbital-bombardment", {
     order_strike = function(force, surface, position, options)
@@ -1039,7 +1492,32 @@ remote.add_interface("orbital-bombardment", {
         position = {x = position.x or position[1], y = position.y or position[2]}
         if not (position.x and position.y) then return false, "invalid arguments" end
         local target, err = order_strike(force, surface, position, game.tick,
-            options.ammo or shared.AMMO_ORDER[1], options.ignore_chart or false)
+            options.ammo or "tungsten-penetrator", options.ignore_chart or false)
         return target ~= nil, err
+    end,
+    -- Clears an area the way dragging the designator does. area = {left_top, right_bottom}.
+    order_area = function(force, surface, area, options)
+        force = game.forces[force]
+        surface = game.surfaces[surface]
+        if not (force and surface and area) then return false, "invalid arguments" end
+        options = options or {}
+        local planned, message = plan_area(force, surface, area,
+            options.ammo or "tungsten-penetrator", game.tick, options.ignore_chart or false)
+        return planned, message
+    end,
+    -- Fire-control settings of one cannon (by unit number); nil keeps a value.
+    set_auto = function(unit_number, mode, ammo, reserve)
+        local cannon = storage.cannons[unit_number]
+        if not cannon then return false end
+        cannon.auto.mode = mode or cannon.auto.mode
+        cannon.auto.ammo = ammo or cannon.auto.ammo
+        cannon.auto.reserve = reserve or cannon.auto.reserve
+        refresh_defending()
+        refresh_auto_guis(unit_number)
+        return true
+    end,
+    -- Tests only: the headless benchmark mode never charts anything.
+    set_ignore_chart = function(value)
+        storage.ignore_chart = value and true or nil
     end,
 })

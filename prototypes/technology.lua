@@ -12,6 +12,7 @@ data:extend({
             {type = "unlock-recipe", recipe = shared.CANNON},
             {type = "unlock-recipe", recipe = "tungsten-penetrator"},
             {type = "unlock-recipe", recipe = "tungsten-slug"},
+            {type = "unlock-recipe", recipe = "orbital-steel-rod"},
         },
         unit = {
             count = 2000,
@@ -116,6 +117,31 @@ data:extend({
         },
         unit = {
             count = 2000,
+            time = 60,
+            ingredients = {
+                {"automation-science-pack", 1},
+                {"logistic-science-pack", 1},
+                {"chemical-science-pack", 1},
+                {"military-science-pack", 1},
+                {"utility-science-pack", 1},
+                {"space-science-pack", 1},
+                {"metallurgic-science-pack", 1},
+            },
+        },
+    },
+})
+
+data:extend({
+    {
+        type = "technology",
+        name = shared.FIRE_CONTROL,
+        icons = {{icon = "__base__/graphics/technology/artillery.png", icon_size = 256, tint = {r = 1, g = 0.9, b = 0.55}}},
+        prerequisites = {shared.TECHNOLOGY},
+        effects = {
+            {type = "nothing", effect_description = {"orbital-bombardment.fire-control-effect"}, use_icon_overlay_constant = true},
+        },
+        unit = {
+            count = 1500,
             time = 60,
             ingredients = {
                 {"automation-science-pack", 1},

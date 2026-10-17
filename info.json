@@ -1,6 +1,6 @@
 {
   "name": "orbital-bombardment",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "title": "Orbital Bombardment",
   "author": "Maxilo",
   "factorio_version": "2.1",
@@ -8,6 +8,6 @@
     "base >= 2.0.0",
     "space-age >= 2.0.0"
   ],
-  "description": "An orbital cannon for your space platforms. While the platform is parked in orbit, mark targets anywhere on the planet below from remote view and tungsten penetrators come down on them from space.",
+  "description": "An orbital cannon for your space platforms. While the platform is parked in orbit, mark targets anywhere on the planet below from remote view - or drag over an area and let the strikes plan themselves, or let the cannon's fire control defend your base and clear the nests in your pollution on its own. Seven kinds of rounds, from steel rods made on the platform to guided rods that hunt demolishers.",
   "thumbnail": "thumbnail.png"
 }

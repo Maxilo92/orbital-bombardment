@@ -15,6 +15,8 @@ shared.TECHNOLOGY = "orbital-bombardment"
 -- sprays burning streams over its circle. A `guided` round locks on to an
 -- enemy instead of a spot and follows it until shortly before impact.
 shared.AMMO = {
+    -- the cheap one: plain steel, made on the platform itself
+    ["orbital-steel-rod"] = {strike = "orbital-steel-strike", radius = 5, flight = 5 * 60, reload = 6 * 60},
     -- the all-rounder: a whole nest cluster in one hit
     ["tungsten-penetrator"] = {strike = "orbital-penetrator-strike", radius = 10, flight = 5 * 60, reload = 10 * 60},
     -- the quick shot: fastest down, fastest reload, one target only
@@ -32,7 +34,7 @@ shared.AMMO = {
 }
 
 -- The order rounds are offered in on the designator's ammo bar.
-shared.AMMO_ORDER = {"tungsten-penetrator", "tungsten-slug", "orbital-cluster-rod", "orbital-emp-rod", "orbital-incendiary-rod", "orbital-guided-rod"}
+shared.AMMO_ORDER = {"orbital-steel-rod", "tungsten-penetrator", "tungsten-slug", "orbital-cluster-rod", "orbital-emp-rod", "orbital-incendiary-rod", "orbital-guided-rod"}
 
 -- The EMP: electric damage to everything hostile in the circle, a stun for
 -- units, worms and nests switched off for a while, and tesla-style chain
@@ -70,8 +72,15 @@ function shared.count_ammo(inventory)
     return counts
 end
 
-shared.FALL_TICKS = 10     -- the last part of that: the rod covers FALL_HEIGHT in a sixth of a second
+shared.FALL_TICKS = 10     -- the visible fall at the end of every flight: FALL_HEIGHT in a sixth of a second
 shared.FALL_HEIGHT = 100   -- tiles above the target the rod starts its visible fall
 shared.MAX_QUEUE = 40      -- marked targets waiting per force and planet
+
+-- Fire control (the cannon picking its own targets).
+shared.FIRE_CONTROL = "orbital-fire-control"
+shared.AUTO_DEFAULT_AMMO = "orbital-steel-rod" -- the round a new cannon's fire control uses
+shared.AUTO_INTERVAL = 60        -- how often idle cannons look for a target
+shared.AUTO_STALE_TICKS = 30 * 60 -- a pick nobody could fire is dropped after this
+shared.AUTO_MAX_STEP_OUT = 30    -- tiles a defence aim may move away from the walls
 
 return shared

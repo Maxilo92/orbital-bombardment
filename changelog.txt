@@ -1,15 +1,24 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.3.1
+Date: 2026-10-17
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.3.0, which is the Factorio 2.1 release.
+---------------------------------------------------------------------------------------------------
 Version: 0.3.0
+Date: 2026-10-17
   Features:
     - Tungsten slug: a plain cast tungsten bar as a second, cheap round (10 tungsten plate). It has
       almost no blast, but whatever it hits takes 25,000 damage - a behemoth worm dies to one slug
       while a nest five tiles away only loses half its health. The splinters fly as before.
   Bugfixes:
-    - The re-entry streak on the map and minimap ran 100-200 ms behind the real one. The map
-      animation's own speed now no longer slows down the speed it is drawn with.
+    - The re-entry streak on the map and minimap ran 100-200 ms behind the real one: the engine
+      multiplies the map animation's own speed with the speed it is drawn at. Both now land on the
+      same tick.
+    - The penetrator's dust no longer rolls out to three times the blast radius. The shockwave and
+      fire-smoke fragments kept their projectile's speed and drifted on for 30 tiles; they now form
+      where they land, so the blast sweeps out and stops at its 10 tiles.
   Graphics:
-    - The penetrator's dust ring is tighter: smaller, shorter-lived dust puffs, a third fewer of
-      them, and the shockwave no longer rolls on far past the blast radius.
+    - Smaller, shorter-lived dust puffs and a third fewer of them.
 ---------------------------------------------------------------------------------------------------
 Version: 0.2.1
 Date: 2026-10-17

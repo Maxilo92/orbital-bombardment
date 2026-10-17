@@ -122,12 +122,6 @@ flash.light_intensity_factor_final = 0
 flash.light_size_factor_initial = 0.5
 flash.light_size_factor_final = 0.7
 
--- The blast wave leaves ground zero fast and brakes hard (negative
--- acceleration), so it reads as an explosive punch rather than a slow bloom.
-local function braking(projectile, acceleration)
-    projectile.acceleration = acceleration
-    return projectile
-end
 -- A tighter, shorter-lived dust puff than the atomic bomb's: the ring should
 -- mark the blast radius, not roll on far past it.
 local dust = table.deepcopy(data.raw["explosion"]["cluster-nuke-explosion"])
@@ -135,16 +129,25 @@ dust.name = "orbital-impact-dust"
 scale_all(dust.animations, 0.75)
 dust.scale_increment_per_tick = 0.001
 dust.fade_out_duration = 20
+-- The blast wave leaves ground zero fast and brakes hard (negative
+-- acceleration), so it reads as an explosive punch rather than a slow bloom.
+--
+-- Every fragment is created standing still where its projectile lands, and the
+-- projectiles fly out to the blast radius: the ring still sweeps outwards,
+-- because near targets are reached first, but it stops dead at the radius.
+-- The atomic bomb's own fragments use create-explosion instead, which keeps
+-- the projectile's speed - measured, they rolled on 30 tiles out (three times
+-- the blast radius) whatever max_movement_distance said.
+local function braking(projectile, acceleration)
+    projectile.acceleration = acceleration
+    return projectile
+end
 local p_dust = braking(wave_projectile("orbital-wave-dust", "atomic-bomb-wave-spawns-cluster-nuke-explosion",
     {type = "create-entity", entity_name = dust.name}), -0.035)
 local p_fire = braking(wave_projectile("orbital-wave-fire", "atomic-bomb-wave-spawns-fire-smoke-explosion",
-    {type = "create-explosion", entity_name = "atomic-fire-smoke",
-     max_movement_distance = 4, max_movement_distance_deviation = 1,
-     inherit_movement_distance_from_projectile = true, cycle_while_moving = true}), -0.03)
+    {type = "create-entity", entity_name = "atomic-fire-smoke"}), -0.035)
 local p_shock = braking(wave_projectile("orbital-wave-shockwave", "atomic-bomb-wave-spawns-nuke-shockwave-explosion",
-    {type = "create-explosion", entity_name = "atomic-nuke-shockwave",
-     max_movement_distance = 4, max_movement_distance_deviation = 1,
-     inherit_movement_distance_from_projectile = true, cycle_while_moving = true}), -0.04)
+    {type = "create-entity", entity_name = "atomic-nuke-shockwave"}), -0.04)
 
 -- Secondary fireballs going off around ground zero over the first fifth of a
 -- second, so the impact ripples instead of popping once.
@@ -256,8 +259,8 @@ local rod = {
                 -- (3500 HP, 15% physical resistance) or a behemoth worm.
                 area_damage(radius, {{amount = 3000, type = "explosion"}, {amount = 1500, type = "physical"}}),
                 wave(p_dust.name, 170, radius, 0.9),
-                wave(p_fire.name, 80, 2, 0.8),
-                wave(p_shock.name, 200, 3, 1.0),
+                wave(p_fire.name, 80, 5, 0.8),
+                wave(p_shock.name, 200, radius * 0.9, 1.0),
                 -- The crater keeps smouldering for a while.
                 {type = "nested-result", action = {
                     type = "area", target_entities = false, trigger_from_target = true,

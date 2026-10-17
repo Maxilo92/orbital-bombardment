@@ -1,4 +1,22 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.9.1
+Date: 2026-10-17
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.9.0.
+---------------------------------------------------------------------------------------------------
+Version: 0.9.0
+Date: 2026-10-17
+  Features:
+    - Automatic ammo, the new default on the designator's ammo bar. Click or drag and the strikes are
+      planned from the rounds loaded in all cannons over the planet: each enemy's real health and
+      resistances against each round's damage, each cannon's own rounds, reload and flight time.
+      The cheapest plan that kills everything wins - rounds that run short count as dearer, time
+      until the last impact counts too.
+    - Infinite research Orbital strike damage (+10% per level) and Orbital reload (+10% fire rate
+      per level).
+  Changes:
+    - Damage numbers live in one table that both the strikes and the planner use.
+---------------------------------------------------------------------------------------------------
 Version: 0.8.3
 Date: 2026-10-17
   Changes:

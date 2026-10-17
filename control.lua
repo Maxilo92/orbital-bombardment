@@ -30,8 +30,9 @@ local TEXT_INBOUND = {r = 1, g = 0.35, b = 0.25}
 -- storage.selectors  [player_index] = true while the ammo bar is shown
 -- storage.rng        LuaRandomGenerator for where cluster bomblets land
 -- storage.scheduled  array of things to do on a given tick, {tick, kind, ...}:
---                    "fall" (a bomblet), "emp", "napalm" and "enable" (an
---                    entity the EMP switched off)
+--                    "fall" (a bomblet), "emp", "napalm", "bonus" (research
+--                    damage on an impact) and "enable" (an entity the EMP
+--                    switched off)
 -- storage.threats    [force_index][surface_index] = array of {position, from, tick}:
 --                    recent enemy attacks on the force's buildings (defence mode)
 -- storage.defending  [force_index] = true while one of its cannons defends
@@ -155,6 +156,24 @@ local function rounds_over(force_index, planet)
     end
     return counts
 end
+
+-- Levels of an infinite research that are done.
+local function levels(force, name)
+    local tech = force.technologies[name]
+    if not tech then return 0 end
+    return tech.researched and tech.level or tech.level - 1
+end
+
+local function damage_bonus(force)
+    return levels(force, shared.DAMAGE_TECH) * shared.DAMAGE_PER_LEVEL
+end
+
+local function reload_ticks(force, ammo)
+    return math.ceil(shared.AMMO[ammo].reload / (1 + levels(force, shared.RELOAD_TECH) * shared.RELOAD_PER_LEVEL))
+end
+
+local STRIKE_AMMO = {} -- strike prototype -> its ammo
+for ammo, data in pairs(shared.AMMO) do STRIKE_AMMO[data.strike] = ammo end
 
 local function is_unlocked(force, ammo)
     local recipe = force.recipes[ammo]
@@ -309,7 +328,7 @@ local function fire(cannon, target, tick)
     else
         stack.clear()
     end
-    cannon.ready_tick = tick + ammo.reload
+    cannon.ready_tick = tick + reload_ticks(entity.force, target.ammo)
 
     local surface = entity.surface
     -- The vanilla flash is an oriented explosion and needs a direction: the
@@ -331,6 +350,12 @@ end
 -- drawn there as well (render_mode "chart"), started on its first frame.
 local STREAK_SPEED, STREAK_FRAMES = 0.4, 16 -- as in prototypes/strike.lua
 
+local function schedule(tick, kind, data)
+    data.tick = tick
+    data.kind = kind
+    storage.scheduled[#storage.scheduled + 1] = data
+end
+
 local function spawn_fall(surface, position, strike, force, tick, small)
     surface.create_entity{
         name = strike,
@@ -339,6 +364,16 @@ local function spawn_fall(surface, position, strike, force, tick, small)
         speed = shared.FALL_HEIGHT / shared.FALL_TICKS,
         force = force,
     }
+    local bonus = force and damage_bonus(force) or 0
+    if bonus > 0 then
+        schedule(tick + shared.FALL_TICKS, "bonus", {
+            surface_index = surface.index,
+            position = position,
+            ammo = STRIKE_AMMO[strike],
+            force_index = force.index,
+            bonus = bonus,
+        })
+    end
     local streak = small and "orbital-reentry-streak-small" or "orbital-reentry-streak"
     surface.create_entity{name = streak, position = position}
     rendering.draw_animation{
@@ -359,12 +394,6 @@ local function random_in_disc(center, radius, even)
     local angle = rng() * 2 * math.pi
     local distance = (even and math.sqrt(rng()) or rng()) * radius
     return {x = center.x + math.cos(angle) * distance, y = center.y + math.sin(angle) * distance}
-end
-
-local function schedule(tick, kind, data)
-    data.tick = tick
-    data.kind = kind
-    storage.scheduled[#storage.scheduled + 1] = data
 end
 
 -- The cluster rod first splits into a few pods, and each pod scatters its
@@ -470,7 +499,7 @@ local function emp(event, tick)
             schedule(tick + shared.EMP_DISABLE_TICKS, "enable", {entity = entity})
         end
         if entity.valid then
-            entity.damage(shared.EMP_DAMAGE, force, "electric")
+            entity.damage(shared.EMP_DAMAGE * (1 + damage_bonus(force)), force, "electric")
         end
     end
 
@@ -523,6 +552,24 @@ local function napalm(event)
     end
 end
 
+-- The research damage bonus: the round's own zones once more, scaled by the
+-- bonus, on the same tick as the impact.
+local function bonus_damage(event)
+    local surface = game.surfaces[event.surface_index]
+    local force = game.forces[event.force_index]
+    local data = shared.AMMO[event.ammo]
+    if not (surface and force and data) then return end
+    for _, zone in ipairs(data.zones) do
+        for _, entity in pairs(surface.find_entities_filtered{position = event.position, radius = zone.radius}) do
+            if entity.valid and entity.is_entity_with_health and entity.destructible then
+                for type, amount in pairs(zone.damage) do
+                    if entity.valid then entity.damage(amount * event.bonus, force, type) end
+                end
+            end
+        end
+    end
+end
+
 local function run_scheduled(tick)
     local scheduled = storage.scheduled
     for i = #scheduled, 1, -1 do
@@ -536,6 +583,8 @@ local function run_scheduled(tick)
                 emp(event, tick)
             elseif event.kind == "napalm" then
                 napalm(event)
+            elseif event.kind == "bonus" then
+                bonus_damage(event)
             elseif event.kind == "enable" and event.entity.valid then
                 event.entity.disabled_by_script = false
             end
@@ -1016,6 +1065,280 @@ local function plan_area(force, surface, area, ammo, tick, ignore_chart)
     return planned, {"orbital-bombardment.area-planned", planned, #enemies, skipped, full and 1 or 0}
 end
 
+--------------------------------------------------------------------------------
+-- the strike planner behind "automatic" ammo
+--------------------------------------------------------------------------------
+
+-- Works out which rounds to fire where so that every enemy in the area dies,
+-- with what is actually loaded over the planet, at the lowest cost.
+--
+-- Damage: each round's zones from shared.AMMO against the enemy's real health
+-- (evolution included) and resistances, measured to the edge of its collision
+-- box. The cluster rod counts with the expected share of its bomblets, the
+-- EMP with its pulse, the incendiary rod with the part of the napalm a
+-- structure sits in (units run out of it but keep burning).
+-- Cannons: every cannon over the planet with its own loaded rounds, reload and
+-- flight times. A strike goes to the cannon that can land it earliest, so
+-- with many cannons rounds fly in parallel and with few the planner leans
+-- towards fewer, heavier strikes.
+-- Choice: greedily, the strike with the most damage value per cost - cost being
+-- the round's worth (dearer as it runs short) plus PLAN_TIME_COST per second
+-- until it lands - until every enemy is expected dead, nothing loaded still
+-- helps, or the queue is full. Greed alone favours cheap rounds that only
+-- wound, so this is run several times with partial damage counting less and
+-- less, and the plan with the lowest total - rounds, time until the last
+-- impact, survivors - is taken. All damage numbers are worked out once up
+-- front; the passes only track health.
+local PLAN_TIME_COST = 0.4      -- cost units per second until impact
+local PLAN_WEIGHT = {static = 3, big = 5, unit = 1}
+local PLAN_NAPALM_SHARE = 0.4   -- share of the burn a structure in the circle takes
+local PLAN_UNIT_FIRE = 1500     -- napalm and fire sticker on a unit caught in it
+local PLAN_NEIGHBOURHOOD = 8    -- aims are also tried at the middle of each enemy's neighbours
+local PLAN_MIN_SCORE = 0.01
+local PLAN_MAX_ENEMIES = 200    -- beyond this, drag a smaller area
+local PLAN_SCARCITY = 2         -- a round with n left is worth (1 + PLAN_SCARCITY / n) times its cost
+local PLAN_SURVIVOR_COST = 50   -- per weight of an enemy a plan leaves alive
+local PLAN_EXPONENTS = {1, 2, 4}
+local BIG_TYPES = {["segmented-unit"] = true, ["spider-unit"] = true}
+local STATIC_TYPES = {["unit-spawner"] = true, ["turret"] = true}
+
+local function resisted(amount, type, resistances)
+    local resistance = resistances and resistances[type]
+    if not resistance then return amount end
+    if amount <= resistance.decrease then return 0 end
+    return (amount - resistance.decrease) * (1 - resistance.percent)
+end
+
+-- Damage one round of `ammo` does to `enemy` at `distance` from the aim,
+-- distance already measured to the edge of the enemy.
+local function strike_damage(ammo, distance, enemy, bonus)
+    local data = shared.AMMO[ammo]
+    local total = 0
+    if data.bomblets then
+        if distance <= data.spread then
+            local zone = data.zones[1]
+            local reach = zone.radius + enemy.size
+            local hits = data.bomblets * math.min(1, reach * reach / (data.spread * data.spread))
+            for type, amount in pairs(zone.damage) do
+                total = total + hits * resisted(amount, type, enemy.resistances)
+            end
+        end
+        return total * (1 + bonus)
+    end
+    for _, zone in ipairs(data.zones) do
+        if distance <= zone.radius then
+            for type, amount in pairs(zone.damage) do
+                total = total + resisted(amount, type, enemy.resistances)
+            end
+        end
+    end
+    if data.emp and distance <= data.radius then
+        total = total + resisted(shared.EMP_DAMAGE, "electric", enemy.resistances)
+    end
+    if data.napalm and distance <= data.radius then
+        if enemy.kind == "unit" then
+            total = total + PLAN_UNIT_FIRE
+        else
+            total = total + resisted(shared.NAPALM_DAMAGE_PER_TICK, "fire", enemy.resistances)
+                * shared.NAPALM_BURN_TICKS * PLAN_NAPALM_SHARE
+        end
+    end
+    return total * (1 + bonus)
+end
+
+local function plan_smart(force, surface, area, tick, ignore_chart)
+    local planet = surface.planet
+    if not planet then return nil, {"orbital-bombardment.error-no-planet"} end
+
+    -- The cannons over the planet: their own rounds and when each can fire.
+    local cannons = {}
+    for id, cannon in pairs(storage.cannons) do
+        local entity = cannon.entity
+        if entity.valid and entity.force.index == force.index and orbit_of(entity) == planet.name then
+            local stock = {}
+            for ammo, count in pairs(shared.count_ammo(ammo_inventory(entity))) do
+                if is_unlocked(force, ammo) then stock[ammo] = count end
+            end
+            cannons[#cannons + 1] = {id = id, ready = math.max(0, cannon.ready_tick - tick), stock = stock}
+        end
+    end
+    if #cannons == 0 then
+        return nil, {"orbital-bombardment.error-no-cannon", planet.prototype.localised_name}
+    end
+    -- Rounds already promised to waiting targets are not available.
+    local queued = 0
+    for _, target in pairs(storage.targets) do
+        if target.state == "queued" and target.force_index == force.index and target.planet == planet.name then
+            if not target.auto then queued = queued + 1 end
+            for _, cannon in ipairs(cannons) do
+                if (cannon.stock[target.ammo] or 0) > 0 then
+                    cannon.stock[target.ammo] = cannon.stock[target.ammo] - 1
+                    break
+                end
+            end
+        end
+    end
+
+    -- The enemies.
+    local enemies = {}
+    for _, entity in pairs(surface.find_entities_filtered{area = area, type = HOSTILE_TYPES}) do
+        if force.is_enemy(entity.force) and entity.health and #enemies < PLAN_MAX_ENEMIES then
+            local box = entity.prototype.collision_box
+            local kind = BIG_TYPES[entity.type] and "big" or STATIC_TYPES[entity.type] and "static" or "unit"
+            enemies[#enemies + 1] = {
+                position = entity.position,
+                hp = entity.health,
+                resistances = entity.prototype.resistances,
+                size = math.max(-box.left_top.x, box.right_bottom.x, -box.left_top.y, box.right_bottom.y),
+                kind = kind,
+                weight = PLAN_WEIGHT[kind],
+            }
+        end
+    end
+    if #enemies == 0 then return nil, {"orbital-bombardment.area-empty"} end
+
+    -- Aims: every enemy, and the middle of every enemy's neighbourhood.
+    local aims = {}
+    local near2 = PLAN_NEIGHBOURHOOD * PLAN_NEIGHBOURHOOD
+    for i, enemy in ipairs(enemies) do
+        aims[#aims + 1] = {position = enemy.position, enemy = i}
+        local x, y, n = 0, 0, 0
+        for _, other in ipairs(enemies) do
+            local dx, dy = other.position.x - enemy.position.x, other.position.y - enemy.position.y
+            if dx * dx + dy * dy <= near2 then x, y, n = x + other.position.x, y + other.position.y, n + 1 end
+        end
+        if n > 1 then aims[#aims + 1] = {position = {x = x / n, y = y / n}} end
+    end
+
+    -- Damage of every round from every aim to every enemy it reaches, once.
+    -- A guided rod only goes for an enemy aim and follows that enemy.
+    local max_reach = 0
+    for _, data in pairs(shared.AMMO) do max_reach = math.max(max_reach, data.spread or data.radius) end
+    local bonus = damage_bonus(force)
+    local hits = {} -- hits[ammo][aim] = {{enemy, damage}, ...}
+    for ammo, data in pairs(shared.AMMO) do
+        hits[ammo] = {}
+        for a, aim in ipairs(aims) do
+            local list = {}
+            if not data.guided or aim.enemy then
+                for e, enemy in ipairs(enemies) do
+                    local dx, dy = enemy.position.x - aim.position.x, enemy.position.y - aim.position.y
+                    local distance = math.sqrt(dx * dx + dy * dy) - enemy.size
+                    if data.guided and e == aim.enemy then distance = 0 end
+                    if distance <= max_reach then
+                        local damage = strike_damage(ammo, math.max(0, distance), enemy, bonus)
+                        if damage > 0 then list[#list + 1] = {e, damage} end
+                    end
+                end
+            end
+            hits[ammo][a] = list
+        end
+    end
+
+    local safe = {} -- safe[ammo .. a]: would this strike miss our own buildings?
+    local function is_safe(ammo, a)
+        local key = ammo .. "|" .. a
+        if safe[key] == nil then
+            safe[key] = not own_near(surface, force, aims[a].position, safety_radius(ammo))
+        end
+        return safe[key]
+    end
+
+    -- One greedy pass. `exponent` sets how much partial damage counts: at 1 a
+    -- strike that leaves five nests at half health looks as good as one that
+    -- kills two and a half of them; higher values favour finishing enemies
+    -- off. Rounds get dearer as they run short.
+    local room = shared.MAX_QUEUE - queued
+    local function plan(exponent)
+        local hp, stock, ready = {}, {}, {}
+        for e, enemy in ipairs(enemies) do hp[e] = enemy.hp end
+        for c, cannon in ipairs(cannons) do
+            stock[c], ready[c] = {}, cannon.ready
+            for ammo, count in pairs(cannon.stock) do stock[c][ammo] = count end
+        end
+        local strikes, spent = {}, 0
+        while #strikes < room do
+            local best
+            for ammo, data in pairs(shared.AMMO) do
+                local cannon, left = nil, 0
+                for c in ipairs(cannons) do
+                    local n = stock[c][ammo] or 0
+                    left = left + n
+                    if n > 0 and (not cannon or ready[c] < ready[cannon]) then cannon = c end
+                end
+                if cannon then
+                    local impact = ready[cannon] + data.flight
+                    local worth = data.cost * (1 + PLAN_SCARCITY / left)
+                    local cost = worth + PLAN_TIME_COST * impact / 60
+                    for a, list in pairs(hits[ammo]) do
+                        local value = 0
+                        for _, hit in ipairs(list) do
+                            local e = hit[1]
+                            if hp[e] > 0 then
+                                value = value + enemies[e].weight * math.min(1, hit[2] / hp[e]) ^ exponent
+                            end
+                        end
+                        local score = value / cost
+                        if score > PLAN_MIN_SCORE and (not best or score > best.score) and is_safe(ammo, a) then
+                            best = {score = score, ammo = ammo, aim = a, cannon = cannon, impact = impact, worth = worth}
+                        end
+                    end
+                end
+            end
+            if not best then break end
+            for _, hit in ipairs(hits[best.ammo][best.aim]) do
+                hp[hit[1]] = hp[hit[1]] - hit[2]
+            end
+            stock[best.cannon][best.ammo] = stock[best.cannon][best.ammo] - 1
+            best.fire_at = ready[best.cannon]
+            ready[best.cannon] = ready[best.cannon] + reload_ticks(force, best.ammo)
+            spent = spent + best.worth
+            strikes[#strikes + 1] = best
+            local alive = false
+            for e = 1, #enemies do if hp[e] > 0 then alive = true break end end
+            if not alive then break end
+        end
+        local last, surviving, lost = 0, 0, 0
+        for _, strike in ipairs(strikes) do last = math.max(last, strike.impact) end
+        for e, enemy in ipairs(enemies) do
+            if hp[e] > 0 then surviving, lost = surviving + 1, lost + enemy.weight end
+        end
+        return strikes, spent + PLAN_TIME_COST * last / 60 + PLAN_SURVIVOR_COST * lost, surviving
+    end
+
+    -- Several passes, the cheapest whole plan wins.
+    local strikes, surviving, best_total
+    for _, exponent in ipairs(PLAN_EXPONENTS) do
+        local candidate, total, left = plan(exponent)
+        if not best_total or total < best_total then
+            strikes, surviving, best_total = candidate, left, total
+        end
+    end
+
+    -- Queue them in the order they are meant to fire.
+    table.sort(strikes, function(x, y) return x.fire_at < y.fire_at end)
+    local used, last_impact, full = {}, 0, false
+    for _, planned in ipairs(strikes) do
+        local target, err = order_strike(force, surface, aims[planned.aim].position, tick, planned.ammo, ignore_chart)
+        if target then
+            used[planned.ammo] = (used[planned.ammo] or 0) + 1
+            last_impact = math.max(last_impact, planned.impact)
+        elseif err and err[1] == "orbital-bombardment.error-queue-full" then
+            full = true
+            break
+        end
+    end
+
+    local list = {""}
+    for _, ammo in ipairs(shared.AMMO_ORDER) do
+        if used[ammo] then list[#list + 1] = used[ammo] .. "× [item=" .. ammo .. "]  " end
+    end
+    if #list == 1 then
+        return 0, {"orbital-bombardment.area-smart-none", #enemies}
+    end
+    return #strikes, {"orbital-bombardment.area-smart", list, #enemies, math.ceil(last_impact / 60), surviving, full and 1 or 0}
+end
+
 local function area_center(area)
     return {
         x = (area.left_top.x + area.right_bottom.x) / 2,
@@ -1068,21 +1391,33 @@ local function unlocked_ammo(force)
 end
 
 -- The player's chosen ammo, falling back to the first unlocked one.
+-- "auto" lets the mod pick the round per target; it is the default.
+local AUTO_AMMO = "auto"
+
 local function selected_ammo(player)
-    local selected = storage.selected[player.index]
-    if selected and shared.AMMO[selected] and is_unlocked(player.force, selected) then
+    local selected = storage.selected[player.index] or AUTO_AMMO
+    if selected == AUTO_AMMO then return AUTO_AMMO end
+    if shared.AMMO[selected] and is_unlocked(player.force, selected) then
         return selected
     end
-    return unlocked_ammo(player.force)[1] or shared.AMMO_ORDER[1]
+    return AUTO_AMMO
 end
 
 -- Radius, time to impact, reload and damage in one tooltip block, so the
 -- rounds can be told apart before they are fired.
-local function ammo_stats(ammo)
+local function ammo_stats(ammo, force)
     local data = shared.AMMO[ammo]
-    return {"", "[color=255,230,192]",
-        {"orbital-bombardment.ammo-stats", data.radius, data.flight / 60, data.reload / 60}, "\n",
-        {"orbital-bombardment.damage-" .. ammo}, "[/color]"}
+    local reload = force and reload_ticks(force, ammo) or data.reload
+    local bonus = force and damage_bonus(force) or 0
+    local lines = {"", "[color=255,230,192]",
+        {"orbital-bombardment.ammo-stats", data.radius, data.flight / 60, math.floor(reload / 6 + 0.5) / 10}, "\n",
+        {"orbital-bombardment.damage-" .. ammo}}
+    if bonus > 0 then
+        lines[#lines + 1] = "\n"
+        lines[#lines + 1] = {"orbital-bombardment.damage-bonus", math.floor(bonus * 100 + 0.5)}
+    end
+    lines[#lines + 1] = "[/color]"
+    return lines
 end
 
 local function hide_selector(player)
@@ -1102,7 +1437,9 @@ local function update_selector(player)
     for _, button in pairs(frame.buttons.children) do
         local ammo = button.tags.orbital_ammo
         button.toggled = ammo == selected
-        button.number = planet and (counts[ammo] or 0) or nil
+        if ammo ~= AUTO_AMMO then
+            button.number = planet and (counts[ammo] or 0) or nil
+        end
     end
 end
 
@@ -1118,19 +1455,26 @@ local function show_selector(player)
     }
     frame.style.use_header_filler = false
     local buttons = frame.add{type = "frame", name = "buttons", style = "slot_button_deep_frame", direction = "horizontal"}
+    buttons.add{
+        type = "sprite-button",
+        style = "slot_button",
+        sprite = "virtual-signal/signal-anything",
+        tooltip = {"", "[font=default-bold]", {"orbital-bombardment.ammo-auto"}, "[/font]\n", {"orbital-bombardment.ammo-auto-tooltip"}},
+        tags = {orbital_ammo = AUTO_AMMO},
+    }
     for _, ammo in ipairs(ammo_list) do
         buttons.add{
             type = "sprite-button",
             style = "slot_button",
             sprite = "item/" .. ammo,
             tooltip = {"", "[font=default-bold]", {"item-name." .. ammo}, "[/font]\n", {"item-description." .. ammo},
-                "\n\n", ammo_stats(ammo)},
+                "\n\n", ammo_stats(ammo, player.force)},
             tags = {orbital_ammo = ammo},
         }
     end
     -- Top centre, below where the vanilla alerts and research sit.
     local scale = player.display_scale
-    local width = (#ammo_list * 40 + 24) * scale
+    local width = ((#ammo_list + 1) * 40 + 24) * scale
     frame.location = {x = math.floor((player.display_resolution.width - width) / 2), y = math.floor(90 * scale)}
     storage.selectors[player.index] = true
     update_selector(player)
@@ -1219,7 +1563,7 @@ local function build_auto_section(container, cannon, force)
                 style = "slot_button",
                 sprite = "item/" .. ammo,
                 toggled = auto.ammo == ammo,
-                tooltip = {"", "[font=default-bold]", {"item-name." .. ammo}, "[/font]\n", ammo_stats(ammo)},
+                tooltip = {"", "[font=default-bold]", {"item-name." .. ammo}, "[/font]\n", ammo_stats(ammo, force)},
                 tags = {orbital_auto = "ammo", cannon = id, ammo = ammo},
             }
         end
@@ -1428,8 +1772,10 @@ script.on_event(defines.events.on_entity_settings_pasted, function(event)
     refresh_auto_guis(destination.unit_number)
 end)
 
--- A click marks one target; dragging a box clears everything in it.
+-- A click marks one target; dragging a box clears everything in it. With
+-- automatic ammo a click plans for the enemies around it.
 local CLICK_SIZE = 3
+local AUTO_CLICK_REACH = 8
 
 script.on_event(defines.events.on_player_selected_area, function(event)
     if event.item ~= DESIGNATOR then return end
@@ -1438,11 +1784,21 @@ script.on_event(defines.events.on_player_selected_area, function(event)
     local area = event.area
     local width = area.right_bottom.x - area.left_top.x
     local height = area.right_bottom.y - area.left_top.y
-    if width < CLICK_SIZE and height < CLICK_SIZE then
-        local target, err = order_strike(player.force, event.surface, area_center(area), event.tick, selected_ammo(player))
+    local ammo = selected_ammo(player)
+    local click = width < CLICK_SIZE and height < CLICK_SIZE
+    if ammo == AUTO_AMMO then
+        if click then
+            local c = area_center(area)
+            area = {left_top = {x = c.x - AUTO_CLICK_REACH, y = c.y - AUTO_CLICK_REACH},
+                    right_bottom = {x = c.x + AUTO_CLICK_REACH, y = c.y + AUTO_CLICK_REACH}}
+        end
+        local _, message = plan_smart(player.force, event.surface, area, event.tick)
+        notify(player, message)
+    elseif click then
+        local target, err = order_strike(player.force, event.surface, area_center(area), event.tick, ammo)
         if not target then notify(player, err) end
     else
-        local planned, message = plan_area(player.force, event.surface, area, selected_ammo(player), event.tick)
+        local _, message = plan_area(player.force, event.surface, area, ammo, event.tick)
         notify(player, message)
     end
     update_selector(player)
@@ -1501,6 +1857,9 @@ remote.add_interface("orbital-bombardment", {
         surface = game.surfaces[surface]
         if not (force and surface and area) then return false, "invalid arguments" end
         options = options or {}
+        if options.ammo == "auto" then
+            return plan_smart(force, surface, area, game.tick, options.ignore_chart or false)
+        end
         local planned, message = plan_area(force, surface, area,
             options.ammo or "tungsten-penetrator", game.tick, options.ignore_chart or false)
         return planned, message

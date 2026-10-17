@@ -155,3 +155,37 @@ data:extend({
         },
     },
 })
+
+-- Infinite research. Both are counted by control.lua: the strikes are made by
+-- script, so the vanilla bonus modifiers would not reach them.
+local function infinite(name, tint, description)
+    return {
+        type = "technology",
+        name = name,
+        icons = {{icon = "__base__/graphics/technology/artillery.png", icon_size = 256, tint = tint}},
+        prerequisites = {shared.TECHNOLOGY},
+        effects = {{type = "nothing", effect_description = description, use_icon_overlay_constant = true}},
+        max_level = "infinite",
+        upgrade = true,
+        unit = {
+            count_formula = "1000 * 1.5^(L-1)",
+            time = 60,
+            ingredients = {
+                {"automation-science-pack", 1},
+                {"logistic-science-pack", 1},
+                {"chemical-science-pack", 1},
+                {"military-science-pack", 1},
+                {"utility-science-pack", 1},
+                {"space-science-pack", 1},
+                {"metallurgic-science-pack", 1},
+            },
+        },
+    }
+end
+
+data:extend({
+    infinite(shared.DAMAGE_TECH, {r = 1, g = 0.45, b = 0.35},
+        {"orbital-bombardment.damage-tech-effect", tostring(math.floor(shared.DAMAGE_PER_LEVEL * 100))}),
+    infinite(shared.RELOAD_TECH, {r = 0.45, g = 0.75, b = 1},
+        {"orbital-bombardment.reload-tech-effect", tostring(math.floor(shared.RELOAD_PER_LEVEL * 100))}),
+})

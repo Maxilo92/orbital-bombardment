@@ -20,9 +20,22 @@ streak from the sky to ground zero, and hits.
 
 Targets have to be in charted territory: you can only hit what your radars can see.
 
-## Area clearing
+## Automatic ammo
 
-Drag the designator over an area instead of clicking a spot. Every enemy in the box is found and the
+The first entry on the ammo bar, and the default. Click near enemies or drag over an area, and the
+strikes are planned from what is loaded in all your cannons over the planet: every enemy's health
+and resistances against every round's damage, every cannon's own rounds, reload and flight time.
+Of several candidate plans the cheapest wins - rounds count by their value and get dearer as they
+run short, and the time until the last impact counts too.
+
+## Infinite research
+
+- **Orbital strike damage**: +10% damage per level, all rounds.
+- **Orbital reload**: +10% fire rate per level.
+
+## Area clearing with one round
+
+With a specific round chosen, drag the designator over an area instead of clicking a spot. Every enemy in the box is found and the
 strikes plan themselves: as few as the chosen round needs to cover them all, nests and worms
 weighing more than units, one guided rod per enemy. Strikes that would land on your own buildings
 are left out, and you are told how many.

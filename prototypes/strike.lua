@@ -245,6 +245,19 @@ local function with(list, extra)
     return list
 end
 
+-- The damage of a round, from its zones in shared.AMMO - the same numbers the
+-- strike planner in control.lua reckons with.
+local function zone_effects(ammo, key)
+    local effects = {}
+    for _, zone in ipairs(shared.AMMO[ammo][key or "zones"]) do
+        local damages = {}
+        for type, amount in pairs(zone.damage) do damages[#damages + 1] = {amount = amount, type = type} end
+        table.sort(damages, function(x, y) return x.type < y.type end)
+        effects[#effects + 1] = area_damage(zone.radius, damages)
+    end
+    return effects
+end
+
 -- The projectile only carries the impact to the ground in exactly FALL_TICKS;
 -- everything visible about the fall is the streak above.
 local rod = {
@@ -295,11 +308,6 @@ local rod = {
                 {type = "play-sound", sound = sounds.nuclear_explosion(0.85), play_on_target_position = true, max_distance = 600},
                 {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
                 {type = "play-sound", sound = sounds.nuclear_explosion_aftershock(0.35), play_on_target_position = true, max_distance = 600},
-                -- Ground zero: nothing survives a direct hit.
-                area_damage(4, {{amount = 10000, type = "physical"}}),
-                -- The blast around it is still enough for a fully evolved nest
-                -- (3500 HP, 15% physical resistance) or a behemoth worm.
-                area_damage(radius, {{amount = 3000, type = "explosion"}, {amount = 1500, type = "physical"}}),
                 wave(p_dust.name, 170, radius, 0.9),
                 wave(p_fire.name, 80, 5, 0.8),
                 wave(p_shock.name, 200, radius * 0.9, 1.0),
@@ -317,13 +325,16 @@ local rod = {
     },
 }
 
+-- Ground zero: nothing survives a direct hit; the blast around it is still
+-- enough for a fully evolved nest (3500 HP, 15% physical resistance).
+with(rod.action.action_delivery.target_effects, zone_effects("tungsten-penetrator"))
+
 data:extend({rod})
 
 --------------------------------------------------------------------------------
 -- the slug
 --------------------------------------------------------------------------------
 
-local slug_radius = shared.AMMO["tungsten-slug"].radius
 
 local slug_flash = table.deepcopy(data.raw["explosion"]["big-explosion"])
 slug_flash.name = "orbital-slug-flash"
@@ -338,7 +349,7 @@ slug_rod.name = "orbital-slug-strike"
 slug_rod.light = {intensity = 1, size = 12, color = {r = 1, g = 0.85, b = 0.7}}
 slug_rod.action.action_delivery.target_effects = with(crater(1.5, "medium-scorchmark", "crater-small"), {
     {type = "create-entity", entity_name = slug_flash.name},
-    {type = "destroy-decoratives", radius = slug_radius, include_soft_decoratives = true,
+    {type = "destroy-decoratives", radius = shared.AMMO["tungsten-slug"].radius, include_soft_decoratives = true,
      include_decals = true, invoke_decorative_trigger = true, decoratives_with_trigger_only = false},
     {type = "invoke-tile-trigger", repeat_count = 1},
     {type = "create-particle", particle_name = "stone-particle-big", repeat_count = 20,
@@ -357,10 +368,10 @@ slug_rod.action.action_delivery.target_effects = with(crater(1.5, "medium-scorch
      strength = 3, full_strength_max_distance = 30, max_distance = 150},
     {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
     -- Whatever is hit takes the whole impact.
-    area_damage(1.5, {{amount = 25000, type = "physical"}}),
-    area_damage(slug_radius, {{amount = 1000, type = "physical"}}),
     wave(p_dust.name, 40, 3, 0.6),
 })
+
+with(slug_rod.action.action_delivery.target_effects, zone_effects("tungsten-slug"))
 
 data:extend({slug_flash, slug_rod})
 
@@ -390,9 +401,10 @@ bomblet.action.action_delivery.target_effects = with(crater(1.2, "medium-scorchm
     {type = "camera-effect", duration = 15, ease_in_duration = 1, ease_out_duration = 20, delay = 0,
      strength = 1.2, full_strength_max_distance = 40, max_distance = 200},
     {type = "play-sound", sound = sounds.large_explosion(0.8), play_on_target_position = true, max_distance = 300},
-    area_damage(3, {{amount = 2000, type = "explosion"}, {amount = 800, type = "physical"}}),
     wave(p_dust.name, 25, 3, 0.6),
 })
+
+with(bomblet.action.action_delivery.target_effects, zone_effects("orbital-cluster-rod"))
 
 data:extend({bomblet})
 
@@ -466,9 +478,10 @@ emp_rod.action.action_delivery.target_effects = {
         {filename = "__space-age__/sound/explosions/lightning-effect-5.ogg", volume = 0.9},
      }}, play_on_target_position = true, max_distance = 400},
     {type = "play-sound", sound = sounds.large_explosion(0.6), play_on_target_position = true, max_distance = 300},
-    -- The rod itself still hits whatever it lands on.
-    area_damage(2, {{amount = 2000, type = "physical"}}),
 }
+
+-- The rod itself still hits whatever it lands on.
+with(emp_rod.action.action_delivery.target_effects, zone_effects("orbital-emp-rod"))
 
 -- The arcs from ground zero to the victims. Space Age's tesla beams carry the
 -- tesla gun's damage and chain on from target to target - measured, they killed
@@ -551,7 +564,7 @@ data:extend({emp_flash, stun, emp_rod, arc, chain_beam, chain, chain_starter})
 -- after NAPALM_BURN_TICKS instead of burning on for most of a minute.
 local napalm_flame = table.deepcopy(data.raw["fire"]["fire-flame"])
 napalm_flame.name = "orbital-napalm-flame"
-napalm_flame.damage_per_tick = {amount = 8, type = "fire"}
+napalm_flame.damage_per_tick = {amount = shared.NAPALM_DAMAGE_PER_TICK, type = "fire"}
 napalm_flame.maximum_damage_multiplier = 1
 napalm_flame.damage_multiplier_increase_per_added_fuel = 0
 napalm_flame.initial_lifetime = shared.NAPALM_BURN_TICKS
@@ -603,10 +616,11 @@ incendiary_rod.action.action_delivery.target_effects = {
     {type = "camera-effect", duration = 25, ease_in_duration = 1, ease_out_duration = 35, delay = 0,
      strength = 4, full_strength_max_distance = 50, max_distance = 220},
     {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
-    -- The burst itself, before the fire takes over.
-    area_damage(3, {{amount = 800, type = "fire"}}),
     wave(p_fire.name, 60, 4, 0.8),
 }
+
+-- The burst itself, before the fire takes over.
+with(incendiary_rod.action.action_delivery.target_effects, zone_effects("orbital-incendiary-rod"))
 
 data:extend({napalm_flame, napalm_stream, incendiary_rod})
 
@@ -617,7 +631,6 @@ data:extend({napalm_flame, napalm_stream, incendiary_rod})
 -- A slug with a seeker: everything goes into what it locked on to, with a
 -- little more blast than the plain slug so a target that dodged at the last
 -- moment still gets hurt. Its mark is a crater between slug and penetrator.
-local guided_radius = shared.AMMO["orbital-guided-rod"].radius
 local guided_rod = table.deepcopy(rod)
 guided_rod.name = "orbital-guided-strike"
 guided_rod.light = {intensity = 1, size = 14, color = {r = 0.8, g = 1, b = 0.7}}
@@ -636,10 +649,10 @@ guided_rod.action.action_delivery.target_effects = with(crater(2.5, "big-scorchm
     {type = "camera-effect", duration = 20, ease_in_duration = 1, ease_out_duration = 30, delay = 0,
      strength = 3.5, full_strength_max_distance = 40, max_distance = 180},
     {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
-    area_damage(2.5, {{amount = 30000, type = "physical"}}),
-    area_damage(guided_radius, {{amount = 2500, type = "explosion"}, {amount = 1000, type = "physical"}}),
     wave(p_dust.name, 50, 4, 0.7),
 })
+
+with(guided_rod.action.action_delivery.target_effects, zone_effects("orbital-guided-rod"))
 
 data:extend({guided_rod})
 
@@ -649,7 +662,6 @@ data:extend({guided_rod})
 
 -- A small kinetic hit: enough for units and worms, two of them for a fully
 -- evolved nest. Its mark is a small crater.
-local steel_radius = shared.AMMO["orbital-steel-rod"].radius
 local steel_rod = table.deepcopy(rod)
 steel_rod.name = "orbital-steel-strike"
 steel_rod.light = {intensity = 0.8, size = 12, color = {r = 1, g = 0.85, b = 0.7}}
@@ -668,9 +680,9 @@ steel_rod.action.action_delivery.target_effects = with(crater(1.8, "medium-scorc
     {type = "camera-effect", duration = 15, ease_in_duration = 1, ease_out_duration = 20, delay = 0,
      strength = 2, full_strength_max_distance = 30, max_distance = 150},
     {type = "play-sound", sound = sounds.large_explosion(0.8), play_on_target_position = true, max_distance = 300},
-    area_damage(2, {{amount = 4000, type = "physical"}}),
-    area_damage(steel_radius, {{amount = 1200, type = "explosion"}, {amount = 600, type = "physical"}}),
     wave(p_dust.name, 40, 4, 0.7),
 })
+
+with(steel_rod.action.action_delivery.target_effects, zone_effects("orbital-steel-rod"))
 
 data:extend({steel_rod})

@@ -1,4 +1,19 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.6.1
+Date: 2026-10-17
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.6.0, which is the Factorio 2.1 release.
+---------------------------------------------------------------------------------------------------
+Version: 0.6.0
+Date: 2026-10-17
+  Features:
+    - Incendiary rod, from the new research Orbital incendiary munition (after the flamethrower;
+      made from flamethrower ammo and tungsten). It bursts on impact and sprays the flamethrower's own
+      burning streams over a 10 tile circle. The ground burns for 15 seconds, units walking through
+      catch fire, nests burn down and worms are badly hurt - in testing a nest reached by the fire
+      was gone after 7 seconds and a behemoth worm lost two thirds of its health. Forests burn too.
+  Changes:
+    - The EMP rod no longer calls down a lightning bolt. The tesla chain lightning stays.
 Version: 0.5.1
 Date: 2026-10-17
   Changes:

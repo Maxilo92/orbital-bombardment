@@ -511,3 +511,57 @@ local chain_starter = {
 }
 
 data:extend({emp_flash, stun, emp_rod, arc, chain_beam, chain, chain_starter})
+
+--------------------------------------------------------------------------------
+-- the incendiary rod
+--------------------------------------------------------------------------------
+
+-- Napalm: the flamethrower's own ground fire, hotter and burning for a fixed
+-- time. The vanilla flame's 13/60 damage per tick is nothing against a nest:
+-- nests take 3 less per hit and resist 60% of fire, worms 70%, so measured it
+-- left a nest at 91% after 20 seconds. 8 per tick burns a nest down when two
+-- flames reach it. Flames are not refuelled by further streams, so they go out
+-- after NAPALM_BURN_TICKS instead of burning on for most of a minute.
+local napalm_flame = table.deepcopy(data.raw["fire"]["fire-flame"])
+napalm_flame.name = "orbital-napalm-flame"
+napalm_flame.damage_per_tick = {amount = 8, type = "fire"}
+napalm_flame.maximum_damage_multiplier = 1
+napalm_flame.damage_multiplier_increase_per_added_fuel = 0
+napalm_flame.initial_lifetime = shared.NAPALM_BURN_TICKS
+napalm_flame.lifetime_increase_by = 0
+napalm_flame.maximum_lifetime = shared.NAPALM_BURN_TICKS
+napalm_flame.maximum_spread_count = 30
+
+-- The flamethrower's stream, flying faster and setting napalm instead of its
+-- ordinary fire where it lands. control.lua sprays these out from ground zero.
+local napalm_stream = table.deepcopy(data.raw["stream"]["flamethrower-fire-stream"])
+napalm_stream.name = "orbital-napalm-stream"
+napalm_stream.particle_horizontal_speed = 0.55
+napalm_stream.particle_horizontal_speed_deviation = 0.05
+for _, action in pairs(napalm_stream.action) do
+    for _, effect in pairs(action.action_delivery.target_effects) do
+        if effect.type == "create-fire" then effect.entity_name = napalm_flame.name end
+    end
+end
+
+local incendiary_rod = table.deepcopy(rod)
+incendiary_rod.name = "orbital-incendiary-strike"
+incendiary_rod.light = {intensity = 1, size = 18, color = {r = 1, g = 0.6, b = 0.3}}
+incendiary_rod.action.action_delivery.target_effects = {
+    {type = "create-entity", entity_name = flash.name},
+    {type = "create-entity", entity_name = burst.name, repeat_count = 5, offset_deviation = {{-2.5, -2.5}, {2.5, 2.5}}},
+    {type = "create-entity", entity_name = "huge-scorchmark", offsets = {{0, -0.5}}},
+    {type = "create-particle", particle_name = "spark-particle-debris", repeat_count = 60,
+     initial_height = 0.6, initial_vertical_speed = 0.25, initial_vertical_speed_deviation = 0.15,
+     speed_from_center = 0.45, speed_from_center_deviation = 0.3, offset_deviation = {{-1, -1}, {1, 1}},
+     tail_length = 12, tail_length_deviation = 6, tail_width = 2, tint = {r = 1, g = 0.6, b = 0.25},
+     only_when_visible = true},
+    {type = "camera-effect", duration = 25, ease_in_duration = 1, ease_out_duration = 35, delay = 0,
+     strength = 4, full_strength_max_distance = 50, max_distance = 220},
+    {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
+    -- The burst itself, before the fire takes over.
+    area_damage(4, {{amount = 1500, type = "fire"}, {amount = 500, type = "explosion"}}),
+    wave(p_fire.name, 60, 4, 0.8),
+}
+
+data:extend({napalm_flame, napalm_stream, incendiary_rod})

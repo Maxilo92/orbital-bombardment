@@ -115,3 +115,29 @@ local emp_recipe = {
 }
 
 data:extend({emp, emp_recipe})
+
+-- Incendiary rod: a tungsten shell packed with flamethrower fuel. It bursts
+-- on impact and sprays burning streams over a wide circle; the ground burns
+-- for a while and anything walking through catches fire. Forests burn too.
+local incendiary = table.deepcopy(penetrator)
+incendiary.name = "orbital-incendiary-rod"
+incendiary.icons = {{icon = "__space-age__/graphics/icons/railgun-ammo.png", tint = {r = 1, g = 0.42, b = 0.18}}}
+incendiary.order = "d[explosive-cannon-shell]-e[orbital]-e[incendiary-rod]"
+incendiary.stack_size = 10
+incendiary.weight = 50 * kg
+
+local incendiary_recipe = {
+    type = "recipe",
+    name = "orbital-incendiary-rod",
+    enabled = false,
+    energy_required = 20,
+    ingredients = {
+        {type = "item", name = "flamethrower-ammo", amount = 10},
+        {type = "item", name = "tungsten-plate", amount = 5},
+        {type = "item", name = "low-density-structure", amount = 1},
+        {type = "item", name = "processing-unit", amount = 1},
+    },
+    results = {{type = "item", name = "orbital-incendiary-rod", amount = 1}},
+}
+
+data:extend({incendiary, incendiary_recipe})

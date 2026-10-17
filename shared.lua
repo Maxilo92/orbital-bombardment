@@ -9,16 +9,18 @@ shared.TECHNOLOGY = "orbital-bombardment"
 -- entry here; `radius` is what the target marker draws. A round with
 -- `bomblets` breaks up above the target and rains about that many `strike`s
 -- over a circle of `spread` tiles instead of falling as one; a round with
--- `emp` releases the EMP described below where it lands.
+-- `emp` releases the EMP described below where it lands, one with `napalm`
+-- sprays burning streams over its circle.
 shared.AMMO = {
     ["tungsten-penetrator"] = {strike = "orbital-penetrator-strike", radius = 10},
     ["tungsten-slug"] = {strike = "orbital-slug-strike", radius = 4},
     ["orbital-cluster-rod"] = {strike = "orbital-cluster-bomblet", radius = 14, bomblets = 12, spread = 12},
     ["orbital-emp-rod"] = {strike = "orbital-emp-strike", radius = 12, emp = true},
+    ["orbital-incendiary-rod"] = {strike = "orbital-incendiary-strike", radius = 10, napalm = true},
 }
 
 -- The order rounds are offered in on the designator's ammo bar.
-shared.AMMO_ORDER = {"tungsten-penetrator", "tungsten-slug", "orbital-cluster-rod", "orbital-emp-rod"}
+shared.AMMO_ORDER = {"tungsten-penetrator", "tungsten-slug", "orbital-cluster-rod", "orbital-emp-rod", "orbital-incendiary-rod"}
 
 -- The EMP: electric damage to everything hostile in the circle, a stun for
 -- units, worms and nests switched off for a while, and tesla-style chain
@@ -31,7 +33,11 @@ shared.EMP_CHAIN_JUMPS = 8
 shared.EMP_CHAIN_RANGE = 9
 shared.EMP_CHAIN_DAMAGE = 150
 shared.EMP_TENDRILS = 8       -- arcs crackling out into the circle
-shared.EMP_LIGHTNING = 1      -- one bolt at ground zero, no storm
+
+-- The incendiary rod: burning streams sprayed from ground zero over the
+-- circle; where they land the ground burns for NAPALM_BURN_TICKS.
+shared.NAPALM_STREAMS = 18
+shared.NAPALM_BURN_TICKS = 15 * 60
 
 -- {ammo name = count} of the cannon rounds in an inventory, any quality.
 function shared.count_ammo(inventory)

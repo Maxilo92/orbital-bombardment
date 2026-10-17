@@ -28,7 +28,7 @@ local TEXT_INBOUND = {r = 1, g = 0.35, b = 0.25}
 -- storage.selectors  [player_index] = true while the ammo bar is shown
 -- storage.rng        LuaRandomGenerator for where cluster bomblets land
 -- storage.scheduled  array of things to do on a given tick, {tick, kind, ...}:
---                    "fall" (a bomblet), "emp", "lightning" and "enable" (an
+--                    "fall" (a bomblet), "emp", "napalm" and "enable" (an
 --                    entity the EMP switched off)
 local function init_storage()
     storage.cannons = storage.cannons or {}
@@ -353,8 +353,9 @@ local function spawn_strike(target, surface, tick)
         spawn_cluster(target, surface, ammo, tick)
     else
         spawn_fall(surface, target.position, ammo.strike, force, tick, false)
-        if ammo.emp then
-            schedule(tick + shared.FALL_TICKS, "emp", {
+        local effect = ammo.emp and "emp" or ammo.napalm and "napalm"
+        if effect then
+            schedule(tick + shared.FALL_TICKS, effect, {
                 surface_index = surface.index,
                 position = target.position,
                 force_index = target.force_index,
@@ -378,8 +379,7 @@ local EMP_DISABLE = {["unit-spawner"] = true, ["turret"] = true}
 -- a sticker; worms and nests cannot carry one, so they are switched off for a
 -- while instead (disabled_by_script, which exists in 2.0 and 2.1 alike).
 -- Arcs crackle out from ground zero, and chain lightning - the Space Age tesla
--- mechanic - starts on a few victims and jumps on from enemy to enemy. One
--- bolt comes down on ground zero.
+-- mechanic - starts on a few victims and jumps on from enemy to enemy.
 local function emp(event, tick)
     local surface = game.surfaces[event.surface_index]
     local force = game.forces[event.force_index]
@@ -440,11 +440,38 @@ local function emp(event, tick)
         }
     end
 
-    for _ = 1, shared.EMP_LIGHTNING do
-        schedule(tick + storage.rng(0, 6), "lightning", {
-            surface_index = event.surface_index,
+end
+
+--------------------------------------------------------------------------------
+-- the incendiary rod
+--------------------------------------------------------------------------------
+
+-- The rod bursts on impact and sprays burning streams - the flamethrower's own
+-- stream, only aimed out from ground zero - to points all over the circle.
+-- Where a stream lands it sets fire to the ground and to whatever stands
+-- there, exactly as a flamethrower would. A core of flames burns at ground
+-- zero itself.
+local function napalm(event)
+    local surface = game.surfaces[event.surface_index]
+    local force = game.forces[event.force_index]
+    if not (surface and force) then return end
+    local center = event.position
+    for _ = 1, shared.NAPALM_STREAMS do
+        surface.create_entity{
+            name = "orbital-napalm-stream",
+            position = center,
+            source_position = {center.x, center.y - 0.5},
+            target_position = random_in_disc(center, event.radius, true),
+            force = force,
+        }
+    end
+    for _ = 1, 5 do
+        surface.create_entity{
+            name = "orbital-napalm-flame",
             position = random_in_disc(center, 2, true),
-        })
+            force = force,
+            initial_ground_flame_count = 4,
+        }
     end
 end
 
@@ -459,11 +486,8 @@ local function run_scheduled(tick)
                 spawn_fall(surface, event.position, event.strike, game.forces[event.force_index], tick, event.small)
             elseif event.kind == "emp" then
                 emp(event, tick)
-            elseif event.kind == "lightning" and surface then
-                -- Not execute_lightning: that needs the surface's own storm
-                -- generator and throws everywhere but Fulgora. Creating the
-                -- lightning entity directly works on any planet.
-                surface.create_entity{name = "lightning", position = event.position}
+            elseif event.kind == "napalm" then
+                napalm(event)
             elseif event.kind == "enable" and event.entity.valid then
                 event.entity.disabled_by_script = false
             end
@@ -825,8 +849,8 @@ script.on_nth_tick(UPDATE_INTERVAL, function(event)
     end
 end)
 
--- Bomblets, lightning and re-enabling worms need tick precision; the 10-tick
--- pass above does not. Nothing to do on almost every tick.
+-- Bomblets, the EMP, napalm and re-enabling worms need tick precision; the
+-- 10-tick pass above does not. Nothing to do on almost every tick.
 script.on_event(defines.events.on_tick, function(event)
     if storage.scheduled[1] then
         run_scheduled(event.tick)

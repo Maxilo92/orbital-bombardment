@@ -48,6 +48,10 @@ explosion + 1,000 physical within 3.5 tiles.
 supercapacitor, 5 tungsten plate, 1 processing unit. 1,200 electric damage within 12 tiles, units
 stunned for 5 s, worms and nests switched off for 8 s, tesla chain lightning jumping between enemies.
 
+**Incendiary rod** (research *Orbital incendiary munition*, after the flamethrower) - 10
+flamethrower ammo, 5 tungsten plate, 1 low density structure, 1 processing unit. Sprays burning
+streams over 10 tiles; the ground burns for 15 s at 8 fire damage per tick per flame.
+
 ## For other mods
 
 ```lua

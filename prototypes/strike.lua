@@ -368,3 +368,146 @@ bomblet.action.action_delivery.target_effects = {
 }
 
 data:extend({bomblet})
+
+--------------------------------------------------------------------------------
+-- the EMP rod
+--------------------------------------------------------------------------------
+
+-- The rod's own impact is only the visible part of the EMP: a blue-white
+-- flash and a burst of electric sparks. Stun, shutdown, the discharge arcs and
+-- the lightning are applied by control.lua on the same tick. (A blue-tinted
+-- shockwave ring was tried and came out as a murky teal dust dome.)
+local EMP_BLUE = {r = 0.45, g = 0.75, b = 1}
+
+local function tint_all(anim, tint)
+    if type(anim) ~= "table" then return end
+    if anim.layers then
+        for _, layer in pairs(anim.layers) do tint_all(layer, tint) end
+    elseif anim.filename or anim.filenames or anim.stripes then
+        anim.tint = tint
+    else
+        for _, child in pairs(anim) do tint_all(child, tint) end
+    end
+end
+
+local emp_flash = table.deepcopy(data.raw["explosion"]["big-explosion"])
+emp_flash.name = "orbital-emp-flash"
+tint_all(emp_flash.animations, EMP_BLUE)
+scale_all(emp_flash.animations, 1.5)
+emp_flash.light = {intensity = 1, size = 40, color = {r = 0.5, g = 0.8, b = 1}}
+emp_flash.light_intensity_factor_final = 0
+emp_flash.light_size_factor_final = 0.6
+
+-- The stun: the vanilla slowdown sticker's swirl, turned electric blue.
+local stun = {
+    type = "sticker",
+    name = "orbital-emp-stun",
+    flags = {"not-on-map"},
+    hidden = true,
+    duration_in_ticks = shared.EMP_STUN_TICKS,
+    target_movement_modifier = 0.02,
+    vehicle_speed_modifier = 0.1,
+    animation = {
+        filename = "__base__/graphics/entity/slowdown-sticker/slowdown-sticker.png",
+        line_length = 5,
+        width = 42,
+        height = 48,
+        frame_count = 50,
+        animation_speed = 1,
+        tint = {r = 0.35, g = 0.65, b = 1, a = 0.8},
+        shift = {0, -0.3},
+        draw_as_glow = true,
+    },
+}
+
+local emp_rod = table.deepcopy(rod)
+emp_rod.name = "orbital-emp-strike"
+emp_rod.light = {intensity = 1, size = 16, color = {r = 0.6, g = 0.85, b = 1}}
+emp_rod.action.action_delivery.target_effects = {
+    {type = "create-entity", entity_name = emp_flash.name},
+    {type = "create-entity", entity_name = "medium-scorchmark", offsets = {{0, -0.5}}},
+    {type = "create-particle", particle_name = "spark-particle-debris", repeat_count = 120,
+     initial_height = 0.6, initial_vertical_speed = 0.2, initial_vertical_speed_deviation = 0.15,
+     speed_from_center = 0.5, speed_from_center_deviation = 0.35, offset_deviation = {{-1, -1}, {1, 1}},
+     tail_length = 12, tail_length_deviation = 6, tail_width = 2, tint = {r = 0.6, g = 0.85, b = 1},
+     only_when_visible = true},
+    {type = "camera-effect", duration = 20, ease_in_duration = 1, ease_out_duration = 30, delay = 0,
+     strength = 3, full_strength_max_distance = 40, max_distance = 200},
+    {type = "play-sound", sound = {variations = {
+        {filename = "__space-age__/sound/explosions/lightning-effect-1.ogg", volume = 0.9},
+        {filename = "__space-age__/sound/explosions/lightning-effect-3.ogg", volume = 0.9},
+        {filename = "__space-age__/sound/explosions/lightning-effect-5.ogg", volume = 0.9},
+     }}, play_on_target_position = true, max_distance = 400},
+    {type = "play-sound", sound = sounds.large_explosion(0.6), play_on_target_position = true, max_distance = 300},
+    -- The rod itself still hits whatever it lands on.
+    area_damage(2, {{amount = 2000, type = "physical"}}),
+}
+
+-- The arcs from ground zero to the victims. Space Age's tesla beams carry the
+-- tesla gun's damage and chain on from target to target - measured, they killed
+-- units 25 tiles outside the EMP. This copy only draws: no damage, no chain.
+local arc = table.deepcopy(data.raw["beam"]["chain-tesla-gun-beam-bounce"])
+arc.name = "orbital-emp-arc"
+arc.action = nil
+
+-- The chain lightning, the Space Age tesla mechanic itself: from each victim
+-- the arc jumps on to the next enemy, forks now and then, and stuns whatever
+-- it touches. Own copies so range, jumps and damage suit the EMP - the tesla
+-- gun's chain wandered far outside the circle.
+local chain_beam = table.deepcopy(data.raw["beam"]["chain-tesla-gun-beam-bounce"])
+chain_beam.name = "orbital-emp-chain-beam"
+chain_beam.action = {
+    type = "direct",
+    action_delivery = {
+        type = "instant",
+        target_effects = {
+            {type = "damage", damage = {amount = shared.EMP_CHAIN_DAMAGE, type = "electric"}},
+            {type = "push-back", distance = 0.25},
+            -- the tesla turret's own stun and slow, plus the EMP's longer stun
+            {type = "create-sticker", sticker = "tesla-turret-stun"},
+            {type = "create-sticker", sticker = "tesla-turret-slow"},
+            {type = "create-sticker", sticker = stun.name},
+        },
+    },
+}
+local chain = {
+    type = "chain-active-trigger",
+    name = "orbital-emp-chain",
+    max_jumps = shared.EMP_CHAIN_JUMPS,
+    max_range_per_jump = shared.EMP_CHAIN_RANGE,
+    jump_delay_ticks = 6,
+    fork_chance = 0.25,
+    action = {
+        type = "direct",
+        action_delivery = {
+            type = "beam",
+            beam = chain_beam.name,
+            max_length = shared.EMP_CHAIN_RANGE + 0.5,
+            duration = 30,
+            add_to_shooter = false,
+            destroy_with_source_or_target = false,
+            source_offset = {0, 0},
+        },
+    },
+}
+-- control.lua starts a chain by sending this invisible carrier from ground
+-- zero to a victim; when it arrives, the chain begins there.
+local chain_starter = {
+    type = "projectile",
+    name = "orbital-emp-chain-starter",
+    flags = {"not-on-map"},
+    hidden = true,
+    acceleration = 0,
+    max_speed = 50,
+    action = {
+        type = "direct",
+        action_delivery = {
+            type = "instant",
+            target_effects = {
+                {type = "nested-result", action = {type = "direct", action_delivery = {type = "chain", chain = chain.name}}},
+            },
+        },
+    },
+}
+
+data:extend({emp_flash, stun, emp_rod, arc, chain_beam, chain, chain_starter})

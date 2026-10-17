@@ -27,6 +27,9 @@ local TEXT_INBOUND = {r = 1, g = 0.35, b = 0.25}
 -- storage.selected   [player_index] = ammo the player's designator marks targets for
 -- storage.selectors  [player_index] = true while the ammo bar is shown
 -- storage.rng        LuaRandomGenerator for where cluster bomblets land
+-- storage.scheduled  array of things to do on a given tick, {tick, kind, ...}:
+--                    "fall" (a bomblet), "emp", "lightning" and "enable" (an
+--                    entity the EMP switched off)
 local function init_storage()
     storage.cannons = storage.cannons or {}
     storage.targets = storage.targets or {}
@@ -34,6 +37,7 @@ local function init_storage()
     storage.selected = storage.selected or {}
     storage.selectors = storage.selectors or {}
     storage.rng = storage.rng or game.create_random_generator()
+    storage.scheduled = storage.scheduled or {}
     -- Targets from 0.3 and earlier knew only one round.
     for _, target in pairs(storage.targets) do
         target.ammo = target.ammo or shared.AMMO_ORDER[1]
@@ -300,28 +304,171 @@ local function spawn_fall(surface, position, strike, force, tick, small)
     }
 end
 
--- A random point within `radius` of `center`, evenly spread over the disc.
-local function random_in_disc(center, radius)
+-- A random point within `radius` of `center`. With `even` the points spread
+-- evenly over the disc; without, they bunch towards the centre.
+local function random_in_disc(center, radius, even)
     local rng = storage.rng
     local angle = rng() * 2 * math.pi
-    local distance = math.sqrt(rng()) * radius
+    local distance = (even and math.sqrt(rng()) or rng()) * radius
     return {x = center.x + math.cos(angle) * distance, y = center.y + math.sin(angle) * distance}
+end
+
+local function schedule(tick, kind, data)
+    data.tick = tick
+    data.kind = kind
+    storage.scheduled[#storage.scheduled + 1] = data
+end
+
+-- The cluster rod first splits into a few pods, and each pod scatters its
+-- bomblets around its own point: clumps and gaps instead of an even sprinkle.
+-- The bomblets come down one after another over about half a second.
+local function spawn_cluster(target, surface, ammo, tick)
+    local rng = storage.rng
+    local pods = {}
+    for i = 1, rng(3, 4) do
+        pods[i] = random_in_disc(target.position, ammo.spread * 0.7, true)
+    end
+    local delay = 0
+    local last = tick
+    for _ = 1, rng(ammo.bomblets - 2, ammo.bomblets + 2) do
+        local pod = pods[rng(1, #pods)]
+        schedule(tick + delay, "fall", {
+            surface_index = surface.index,
+            position = random_in_disc(pod, ammo.spread * 0.35, false),
+            strike = ammo.strike,
+            force_index = target.force_index,
+            small = true,
+        })
+        last = tick + delay
+        delay = delay + rng(0, 4)
+    end
+    -- Keep the marker up until the last bomblet is down.
+    target.done_tick = last + shared.FALL_TICKS
 end
 
 local function spawn_strike(target, surface, tick)
     local ammo = shared.AMMO[target.ammo]
     local force = game.forces[target.force_index]
     if ammo.bomblets then
-        -- The cluster rod breaks up high above the target and its bomblets
-        -- rain down over the whole circle at once.
-        for _ = 1, ammo.bomblets do
-            spawn_fall(surface, random_in_disc(target.position, ammo.spread), ammo.strike, force, tick, true)
-        end
+        spawn_cluster(target, surface, ammo, tick)
     else
         spawn_fall(surface, target.position, ammo.strike, force, tick, false)
+        if ammo.emp then
+            schedule(tick + shared.FALL_TICKS, "emp", {
+                surface_index = surface.index,
+                position = target.position,
+                force_index = target.force_index,
+                radius = ammo.radius,
+            })
+        end
     end
     surface.play_sound{path = "orbital-sonic-boom", position = target.position}
     target.fall_spawned = true
+end
+
+--------------------------------------------------------------------------------
+-- the EMP
+--------------------------------------------------------------------------------
+
+local EMP_TYPES = {"unit", "spider-unit", "segmented-unit", "unit-spawner", "turret"}
+local EMP_STUNNABLE = {["unit"] = true, ["spider-unit"] = true}
+local EMP_DISABLE = {["unit-spawner"] = true, ["turret"] = true}
+
+-- Everything hostile in the circle takes electric damage. Units are stunned by
+-- a sticker; worms and nests cannot carry one, so they are switched off for a
+-- while instead (disabled_by_script, which exists in 2.0 and 2.1 alike).
+-- Arcs crackle out from ground zero, and chain lightning - the Space Age tesla
+-- mechanic - starts on a few victims and jumps on from enemy to enemy. One
+-- bolt comes down on ground zero.
+local function emp(event, tick)
+    local surface = game.surfaces[event.surface_index]
+    local force = game.forces[event.force_index]
+    if not (surface and force) then return end
+    local center, radius = event.position, event.radius
+
+    local victims = {}
+    for _, entity in pairs(surface.find_entities_filtered{position = center, radius = radius, type = EMP_TYPES}) do
+        if entity.valid and force.is_enemy(entity.force) then
+            victims[#victims + 1] = entity
+        end
+    end
+
+    for i = #victims, 2, -1 do -- shuffle, so the chains start on random victims
+        local j = storage.rng(1, i)
+        victims[i], victims[j] = victims[j], victims[i]
+    end
+    for index, entity in ipairs(victims) do
+        if entity.valid and index <= shared.EMP_CHAINS then
+            -- An arc to the victim, and from there the chain lightning jumps on.
+            surface.create_entity{
+                name = "orbital-emp-arc",
+                position = center,
+                source_position = {center.x, center.y - 1},
+                target = entity,
+                duration = 30,
+            }
+            surface.create_entity{
+                name = "orbital-emp-chain-starter",
+                position = center,
+                target = entity,
+                speed = 2,
+                force = force,
+            }
+        end
+        if entity.valid and EMP_STUNNABLE[entity.type] then
+            surface.create_entity{name = "orbital-emp-stun", position = entity.position, target = entity}
+        elseif entity.valid and EMP_DISABLE[entity.type] and not entity.disabled_by_script then
+            entity.disabled_by_script = true
+            schedule(tick + shared.EMP_DISABLE_TICKS, "enable", {entity = entity})
+        end
+        if entity.valid then
+            entity.damage(shared.EMP_DAMAGE, force, "electric")
+        end
+    end
+
+    -- The discharge itself: arcs crackling out from ground zero in every
+    -- direction, to the edge of the circle.
+    for i = 1, shared.EMP_TENDRILS do
+        local angle = (i + storage.rng()) / shared.EMP_TENDRILS * 2 * math.pi
+        local reach = radius * (0.55 + 0.45 * storage.rng())
+        surface.create_entity{
+            name = "orbital-emp-arc",
+            position = center,
+            source_position = {center.x, center.y - 1},
+            target_position = {center.x + math.cos(angle) * reach, center.y + math.sin(angle) * reach},
+            duration = storage.rng(18, 34),
+        }
+    end
+
+    for _ = 1, shared.EMP_LIGHTNING do
+        schedule(tick + storage.rng(0, 6), "lightning", {
+            surface_index = event.surface_index,
+            position = random_in_disc(center, 2, true),
+        })
+    end
+end
+
+local function run_scheduled(tick)
+    local scheduled = storage.scheduled
+    for i = #scheduled, 1, -1 do
+        local event = scheduled[i]
+        if event.tick <= tick then
+            table.remove(scheduled, i)
+            local surface = event.surface_index and game.surfaces[event.surface_index]
+            if event.kind == "fall" and surface then
+                spawn_fall(surface, event.position, event.strike, game.forces[event.force_index], tick, event.small)
+            elseif event.kind == "emp" then
+                emp(event, tick)
+            elseif event.kind == "lightning" and surface then
+                -- Not execute_lightning: that needs the surface's own storm
+                -- generator and throws everywhere but Fulgora. Creating the
+                -- lightning entity directly works on any planet.
+                surface.create_entity{name = "lightning", position = event.position}
+            elseif event.kind == "enable" and event.entity.valid then
+                event.entity.disabled_by_script = false
+            end
+        end
+    end
 end
 
 -- The blast on the map: the strike circle flares up and fades.
@@ -374,7 +521,7 @@ local function process_targets(tick)
             if target.fall_spawned and not target.flashed and tick >= target.impact_tick then
                 flash_on_map(target, surface)
             end
-            if tick >= target.impact_tick + UPDATE_INTERVAL then
+            if tick >= (target.done_tick or target.impact_tick) + UPDATE_INTERVAL then
                 destroy_markers(target)
                 table.remove(targets, i)
             else
@@ -675,6 +822,14 @@ script.on_nth_tick(UPDATE_INTERVAL, function(event)
         else
             storage.selectors[player_index] = nil
         end
+    end
+end)
+
+-- Bomblets, lightning and re-enabling worms need tick precision; the 10-tick
+-- pass above does not. Nothing to do on almost every tick.
+script.on_event(defines.events.on_tick, function(event)
+    if storage.scheduled[1] then
+        run_scheduled(event.tick)
     end
 end)
 

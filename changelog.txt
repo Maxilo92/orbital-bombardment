@@ -1,4 +1,27 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.5.1
+Date: 2026-10-17
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.5.0, which is the Factorio 2.1 release.
+---------------------------------------------------------------------------------------------------
+Version: 0.5.0
+Date: 2026-10-17
+  Features:
+    - EMP rod, from the new research Orbital EMP munition (needs electromagnetic science from
+      Fulgora; made from tesla ammo, supercapacitors and tungsten). It deals moderate electric damage
+      to everything hostile within 12 tiles, stuns units for 5 seconds and switches worms and nests
+      off for 8 seconds - no worm fires, no nest spawns. Arcs crackle out from ground zero and tesla
+      chain lightning, the tesla turret's own mechanic, jumps from enemy to enemy and stuns whatever
+      it touches. Small biters die, behemoths are left standing still: the strike to open a ground
+      assault with.
+  Graphics:
+    - The cluster rod no longer lands like a grid all at once. It first splits into three or four
+      pods, each scattering its bomblets around its own point, so the pattern has clumps and gaps,
+      and the bomblets come down one after another over about half a second. The number of bomblets
+      varies a little from rod to rod.
+  Balancing:
+    - With the clumpier pattern a single cluster rod no longer reliably clears a whole field: in the
+      same test it left two of nine nests and two of three worms. A second rod finishes the job.
 Version: 0.4.1
 Date: 2026-10-17
   Changes:

@@ -88,3 +88,30 @@ local cluster_recipe = {
 }
 
 data:extend({cluster, cluster_recipe})
+
+-- EMP rod: a bundle of tesla charges from Fulgora in a tungsten shell. Little
+-- damage; it stuns units, switches off worms and nests for a while and sends
+-- tesla chain lightning through the target - the strike to open with before
+-- going in on the ground.
+local emp = table.deepcopy(penetrator)
+emp.name = "orbital-emp-rod"
+emp.icons = {{icon = "__space-age__/graphics/icons/railgun-ammo.png", tint = {r = 0.5, g = 0.8, b = 1}}}
+emp.order = "d[explosive-cannon-shell]-e[orbital]-d[emp-rod]"
+emp.stack_size = 10
+emp.weight = 50 * kg
+
+local emp_recipe = {
+    type = "recipe",
+    name = "orbital-emp-rod",
+    enabled = false,
+    energy_required = 20,
+    ingredients = {
+        {type = "item", name = "tesla-ammo", amount = 10},
+        {type = "item", name = "supercapacitor", amount = 2},
+        {type = "item", name = "tungsten-plate", amount = 5},
+        {type = "item", name = "processing-unit", amount = 1},
+    },
+    results = {{type = "item", name = "orbital-emp-rod", amount = 1}},
+}
+
+data:extend({emp, emp_recipe})

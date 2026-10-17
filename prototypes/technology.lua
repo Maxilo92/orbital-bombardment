@@ -53,3 +53,29 @@ data:extend({
         },
     },
 })
+
+data:extend({
+    {
+        type = "technology",
+        name = "orbital-emp-munition",
+        icons = {{icon = "__base__/graphics/technology/artillery.png", icon_size = 256, tint = {r = 0.55, g = 0.8, b = 1}}},
+        prerequisites = {shared.TECHNOLOGY, "electromagnetic-science-pack"},
+        effects = {
+            {type = "unlock-recipe", recipe = "orbital-emp-rod"},
+        },
+        unit = {
+            count = 1500,
+            time = 60,
+            ingredients = {
+                {"automation-science-pack", 1},
+                {"logistic-science-pack", 1},
+                {"chemical-science-pack", 1},
+                {"military-science-pack", 1},
+                {"utility-science-pack", 1},
+                {"space-science-pack", 1},
+                {"metallurgic-science-pack", 1},
+                {"electromagnetic-science-pack", 1},
+            },
+        },
+    },
+})

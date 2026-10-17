@@ -44,6 +44,10 @@ little else: the precision round against single targets.
 density structure, 2 processing unit. Breaks up into 12 bomblets over a 12 tile circle, each 3,000
 explosion + 1,000 physical within 3.5 tiles.
 
+**EMP rod** (research *Orbital EMP munition*, needs electromagnetic science) - 10 tesla ammo, 2
+supercapacitor, 5 tungsten plate, 1 processing unit. 1,200 electric damage within 12 tiles, units
+stunned for 5 s, worms and nests switched off for 8 s, tesla chain lightning jumping between enemies.
+
 ## For other mods
 
 ```lua

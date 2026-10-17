@@ -104,3 +104,28 @@ data:extend({
         },
     },
 })
+
+data:extend({
+    {
+        type = "technology",
+        name = "orbital-guided-munition",
+        icons = {{icon = "__base__/graphics/technology/artillery.png", icon_size = 256, tint = {r = 0.75, g = 1, b = 0.6}}},
+        prerequisites = {shared.TECHNOLOGY},
+        effects = {
+            {type = "unlock-recipe", recipe = "orbital-guided-rod"},
+        },
+        unit = {
+            count = 2000,
+            time = 60,
+            ingredients = {
+                {"automation-science-pack", 1},
+                {"logistic-science-pack", 1},
+                {"chemical-science-pack", 1},
+                {"military-science-pack", 1},
+                {"utility-science-pack", 1},
+                {"space-science-pack", 1},
+                {"metallurgic-science-pack", 1},
+            },
+        },
+    },
+})

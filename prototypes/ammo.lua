@@ -141,3 +141,29 @@ local incendiary_recipe = {
 }
 
 data:extend({incendiary, incendiary_recipe})
+
+-- Guided rod: a tungsten slug with a seeker and fins. It locks on to an enemy
+-- and follows it until a second before impact - the answer to anything that
+-- moves, demolishers included.
+local guided = table.deepcopy(penetrator)
+guided.name = "orbital-guided-rod"
+guided.icons = {{icon = "__space-age__/graphics/icons/railgun-ammo.png", tint = {r = 0.75, g = 1, b = 0.6}}}
+guided.order = "d[explosive-cannon-shell]-e[orbital]-f[guided-rod]"
+guided.stack_size = 10
+guided.weight = 50 * kg
+
+local guided_recipe = {
+    type = "recipe",
+    name = "orbital-guided-rod",
+    enabled = false,
+    energy_required = 25,
+    ingredients = {
+        {type = "item", name = "tungsten-slug", amount = 2},
+        {type = "item", name = "processing-unit", amount = 5},
+        {type = "item", name = "low-density-structure", amount = 2},
+        {type = "item", name = "explosives", amount = 5},
+    },
+    results = {{type = "item", name = "orbital-guided-rod", amount = 1}},
+}
+
+data:extend({guided, guided_recipe})

@@ -22,7 +22,9 @@ local TEXT_INBOUND = {r = 1, g = 0.35, b = 0.25}
 -- storage.targets    array, oldest first, of
 --                    {force_index, surface_index, planet, position, ammo, state = "queued" | "inbound",
 --                     reason, radius, impact_tick, sound_played, fall_spawned, flashed,
---                     objects = {LuaRenderObject}, label = LuaRenderObject, label_key}
+--                     objects = {LuaRenderObject}, label = LuaRenderObject, label_key,
+--                     guided rounds also: entity (followed until locked), locked,
+--                     seen_position, seen_tick (for the lead)}
 -- storage.guis       [player_index] = unit_number of the cannon whose window is open
 -- storage.selected   [player_index] = ammo the player's designator marks targets for
 -- storage.selectors  [player_index] = true while the ammo bar is shown
@@ -151,14 +153,34 @@ local function destroy_markers(target)
     target.label_key = nil
 end
 
+-- Where a marker is drawn: on the followed enemy while a guided round is
+-- still tracking it (render objects then move with it on their own), on the
+-- fixed target position otherwise.
+local function tracking(target)
+    return target.entity and target.entity.valid and not target.locked
+end
+
+local function anchor(target, dy)
+    if tracking(target) then
+        return {entity = target.entity, offset = {0, dy or 0}}
+    end
+    return {x = target.position.x, y = target.position.y + (dy or 0)}
+end
+
 local function update_label(target, tick)
     local label = target.label
     if not (label and label.valid) then return end
     local text, key
     if target.state == "inbound" then
         local seconds = math.max(0, math.ceil((target.impact_tick - tick) / 60))
-        key = "in" .. seconds
-        text = {"orbital-bombardment.marker-inbound", seconds}
+        if target.entity then
+            local mode = tracking(target) and "tracking" or "locked"
+            key = mode .. seconds
+            text = {"orbital-bombardment.marker-" .. mode, seconds}
+        else
+            key = "in" .. seconds
+            text = {"orbital-bombardment.marker-inbound", seconds}
+        end
     else
         key = "q" .. target.reason
         text = {"orbital-bombardment.marker-queued",
@@ -186,7 +208,7 @@ local function draw_markers(target, tick)
             radius = target.radius,
             width = inbound and 5 or 3,
             filled = false,
-            target = target.position,
+            target = anchor(target),
             surface = surface,
             forces = forces,
             render_mode = mode,
@@ -198,7 +220,7 @@ local function draw_markers(target, tick)
             color = FILL_INBOUND,
             radius = target.radius,
             filled = true,
-            target = target.position,
+            target = anchor(target),
             surface = surface,
             forces = forces,
             draw_on_ground = true,
@@ -208,7 +230,7 @@ local function draw_markers(target, tick)
             color = LINE_INBOUND,
             radius = 1.2,
             filled = true,
-            target = target.position,
+            target = anchor(target),
             surface = surface,
             forces = forces,
             draw_on_ground = true,
@@ -219,7 +241,7 @@ local function draw_markers(target, tick)
             radius = target.radius * 0.5,
             width = 3,
             filled = false,
-            target = target.position,
+            target = anchor(target),
             surface = surface,
             forces = forces,
             draw_on_ground = true,
@@ -229,7 +251,7 @@ local function draw_markers(target, tick)
     target.label = rendering.draw_text{
         text = "",
         surface = surface,
-        target = {x = target.position.x, y = target.position.y - target.radius - 1},
+        target = anchor(target, -target.radius - 1),
         color = inbound and TEXT_INBOUND or TEXT_QUEUED,
         scale = 3,
         alignment = "center",
@@ -240,7 +262,7 @@ local function draw_markers(target, tick)
     objects[#objects + 1] = target.label
     objects[#objects + 1] = rendering.draw_sprite{
         sprite = "item/" .. target.ammo,
-        target = {x = target.position.x, y = target.position.y - target.radius - 3.2},
+        target = anchor(target, -target.radius - 3.2),
         surface = surface,
         forces = forces,
         x_scale = 1.5,
@@ -255,13 +277,14 @@ end
 
 local function fire(cannon, target, tick)
     local entity = cannon.entity
+    local ammo = shared.AMMO[target.ammo]
     local stack = ammo_stack(entity, target.ammo)
     if stack.count > 1 then
         stack.count = stack.count - 1
     else
         stack.clear()
     end
-    cannon.ready_tick = tick + shared.RELOAD_TICKS
+    cannon.ready_tick = tick + ammo.reload
 
     local surface = entity.surface
     -- The vanilla flash is an oriented explosion and needs a direction: the
@@ -273,7 +296,7 @@ local function fire(cannon, target, tick)
     target.state = "inbound"
     -- Impact lands on the processing grid, so the fall starts exactly
     -- FALL_TICKS before it and the map flash goes off on the impact tick.
-    target.impact_tick = math.ceil((tick + shared.FLIGHT_TICKS) / UPDATE_INTERVAL) * UPDATE_INTERVAL
+    target.impact_tick = math.ceil((tick + ammo.flight) / UPDATE_INTERVAL) * UPDATE_INTERVAL
     draw_markers(target, tick)
 end
 
@@ -526,15 +549,50 @@ local function fire_queued(tick)
     end
 end
 
+-- A guided round follows its enemy: the target position moves with it, and
+-- the last two sightings give its velocity. GUIDED_LOCK_TICKS before impact
+-- the aim is fixed where the enemy will be by then. An enemy that dies before
+-- the lock leaves the aim where it was last seen.
+local function guide(target, tick)
+    local entity = target.entity
+    if target.locked then return end
+    if entity.valid then
+        local now = entity.position
+        if target.seen_tick and tick > target.seen_tick then
+            local dt = tick - target.seen_tick
+            target.velocity = {x = (now.x - target.seen_position.x) / dt, y = (now.y - target.seen_position.y) / dt}
+        end
+        target.seen_position, target.seen_tick = now, tick
+        target.position = {x = now.x, y = now.y}
+    end
+    if target.state == "inbound" and (tick >= target.impact_tick - shared.GUIDED_LOCK_TICKS or not entity.valid) then
+        local lead = target.velocity or {x = 0, y = 0}
+        local remaining = math.max(0, target.impact_tick - tick)
+        local dx, dy = lead.x * remaining, lead.y * remaining
+        local length = math.sqrt(dx * dx + dy * dy)
+        if length > shared.GUIDED_MAX_LEAD then
+            dx, dy = dx / length * shared.GUIDED_MAX_LEAD, dy / length * shared.GUIDED_MAX_LEAD
+        end
+        target.position = {x = target.position.x + dx, y = target.position.y + dy}
+        target.locked = true
+        draw_markers(target, tick)
+    end
+end
+
 local function process_targets(tick)
     local targets = storage.targets
     for i = #targets, 1, -1 do
         local target = targets[i]
         local surface = game.surfaces[target.surface_index]
-        if not surface then
+        if target.entity and target.state == "queued" and not target.entity.valid then
+            -- The enemy died before any cannon could fire at it: nothing to hit.
+            destroy_markers(target)
+            table.remove(targets, i)
+        elseif not surface then
             destroy_markers(target)
             table.remove(targets, i)
         elseif target.state == "inbound" then
+            if target.entity then guide(target, tick) end
             if not target.sound_played and tick >= target.impact_tick - REENTRY_SOUND_TICKS then
                 surface.play_sound{path = "orbital-reentry", position = target.position}
                 target.sound_played = true
@@ -554,12 +612,36 @@ local function process_targets(tick)
         end
     end
 
+    for _, target in ipairs(targets) do
+        if target.entity and target.state == "queued" and target.entity.valid then
+            target.position = target.entity.position
+        end
+    end
     fire_queued(tick)
 end
 
 --------------------------------------------------------------------------------
 -- marking and cancelling targets
 --------------------------------------------------------------------------------
+
+local GUIDED_TYPES = {"unit", "spider-unit", "segmented-unit", "segment", "unit-spawner", "turret"}
+
+-- The enemy nearest to `position` a guided round can lock on to, or nil.
+local function nearest_enemy(force, surface, position)
+    local best, best_distance
+    for _, entity in pairs(surface.find_entities_filtered{
+        position = position, radius = shared.GUIDED_SNAP_RADIUS, type = GUIDED_TYPES,
+    }) do
+        if force.is_enemy(entity.force) then
+            local dx, dy = entity.position.x - position.x, entity.position.y - position.y
+            local distance = dx * dx + dy * dy
+            if not best or distance < best_distance then
+                best, best_distance = entity, distance
+            end
+        end
+    end
+    return best
+end
 
 -- Queues a strike with `ammo`. Returns the target, or nil and a localised
 -- reason why not. `ignore_chart` exists for headless tests only: the benchmark
@@ -582,6 +664,14 @@ local function order_strike(force, surface, position, tick, ammo, ignore_chart)
     if not has_cannon_over(force.index, planet.name) then
         return nil, {"orbital-bombardment.error-no-cannon", planet.prototype.localised_name}
     end
+    local followed
+    if shared.AMMO[ammo].guided then
+        followed = nearest_enemy(force, surface, position)
+        if not followed then
+            return nil, {"orbital-bombardment.error-no-guided-target", shared.GUIDED_SNAP_RADIUS}
+        end
+        position = followed.position
+    end
     local queued = 0
     for _, other in pairs(storage.targets) do
         if other.force_index == force.index and other.planet == planet.name and other.state == "queued" then
@@ -602,6 +692,7 @@ local function order_strike(force, surface, position, tick, ammo, ignore_chart)
         reason = "no-cannon",
         radius = shared.AMMO[ammo].radius,
         objects = {},
+        entity = followed,
     }
     storage.targets[#storage.targets + 1] = target
     draw_markers(target, tick)
@@ -671,6 +762,15 @@ local function selected_ammo(player)
     return unlocked_ammo(player.force)[1] or shared.AMMO_ORDER[1]
 end
 
+-- Radius, time to impact, reload and damage in one tooltip block, so the
+-- rounds can be told apart before they are fired.
+local function ammo_stats(ammo)
+    local data = shared.AMMO[ammo]
+    return {"", "[color=255,230,192]",
+        {"orbital-bombardment.ammo-stats", data.radius, data.flight / 60, data.reload / 60}, "\n",
+        {"orbital-bombardment.damage-" .. ammo}, "[/color]"}
+end
+
 local function hide_selector(player)
     local frame = player.gui.screen[SELECTOR_NAME]
     if frame then frame.destroy() end
@@ -709,7 +809,8 @@ local function show_selector(player)
             type = "sprite-button",
             style = "slot_button",
             sprite = "item/" .. ammo,
-            tooltip = {"", "[font=default-bold]", {"item-name." .. ammo}, "[/font]\n", {"item-description." .. ammo}},
+            tooltip = {"", "[font=default-bold]", {"item-name." .. ammo}, "[/font]\n", {"item-description." .. ammo},
+                "\n\n", ammo_stats(ammo)},
             tags = {orbital_ammo = ammo},
         }
     end
@@ -934,6 +1035,9 @@ remote.add_interface("orbital-bombardment", {
         surface = game.surfaces[surface]
         if not (force and surface and position) then return false, "invalid arguments" end
         options = options or {}
+        -- MapPosition may come as {x = .., y = ..} or as {.., ..}.
+        position = {x = position.x or position[1], y = position.y or position[2]}
+        if not (position.x and position.y) then return false, "invalid arguments" end
         local target, err = order_strike(force, surface, position, game.tick,
             options.ammo or shared.AMMO_ORDER[1], options.ignore_chart or false)
         return target ~= nil, err

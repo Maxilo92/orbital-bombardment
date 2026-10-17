@@ -20,44 +20,41 @@ streak from the sky to ground zero, and hits.
 
 Targets have to be in charted territory: you can only hit what your radars can see.
 
-## Numbers
+## Rounds
 
-| | |
-|---|---|
-| Ground zero (4 tiles) | 10,000 physical |
-| Blast (10 tiles) | 3,000 explosion + 1,500 physical - enough for a fully evolved nest |
-| Also | destroys cliffs within 6 tiles, leaves a crater |
-| Flight time | 5 s from firing to impact |
-| Reload | 10 s per cannon |
-| Queue | up to 40 waiting targets per planet |
+Each round has its own speed, reach and punch. Flight is the time from firing to impact - the
+countdown on the ground.
 
-**Orbital cannon** - 1 artillery turret, 50 tungsten plate, 20 low density structure, 20 processing
-unit. Two per rocket.
+| Round | Flight | Reload | Radius | Damage | Research |
+|---|---|---|---|---|---|
+| Tungsten slug | 2 s | 4 s | 2.5 | 25,000 on one point | Orbital bombardment |
+| EMP rod | 3 s | 8 s | 14 | 600 electric, units stunned 5 s, worms and nests off 8 s, tesla chain lightning | Orbital EMP munition (electromagnetic science) |
+| Tungsten penetrator | 5 s | 10 s | 10 | 10,000 at the core, 4,500 to the edge, levels cliffs | Orbital bombardment |
+| Incendiary rod | 6 s | 10 s | 7 | 800 burst, then 15 s of napalm at 8 fire per tick | Orbital incendiary munition |
+| Cluster rod | 7 s | 12 s | 20 | 16 bomblets of 2,800 | Orbital cluster munition |
+| Guided rod | 8 s | 15 s | 4 | 30,000 direct hit, 3,500 around; locks on and follows its target | Orbital guided munition |
 
-**Tungsten penetrator** - 10 tungsten plate, 4 tungsten carbide, 1 low density structure, 1
-processing unit. Twenty per rocket.
+Every round leaves its own mark: the penetrator a large crater, the slug a single hole, the cluster
+rod a field of small craters, the incendiary rod blackened ground, the guided rod a mid-sized
+crater - and the EMP none.
 
-**Tungsten slug** - 10 tungsten plate. Twenty-five per rocket. 25,000 physical within 1.5 tiles,
-little else: the precision round against single targets.
+Recipes: **penetrator** 10 tungsten plate, 4 tungsten carbide, 1 low density structure, 1
+processing unit - **slug** 10 tungsten plate - **cluster rod** 6 tungsten carbide, 10 explosives, 2
+low density structure, 2 processing unit - **EMP rod** 10 tesla ammo, 2 supercapacitor, 5 tungsten
+plate, 1 processing unit - **incendiary rod** 10 flamethrower ammo, 5 tungsten plate, 1 low density
+structure, 1 processing unit - **guided rod** 2 tungsten slug, 5 processing unit, 2 low density
+structure, 5 explosives.
 
-**Cluster rod** (research *Orbital cluster munition*) - 6 tungsten carbide, 10 explosives, 2 low
-density structure, 2 processing unit. Breaks up into 12 bomblets over a 12 tile circle, each 3,000
-explosion + 1,000 physical within 3.5 tiles.
-
-**EMP rod** (research *Orbital EMP munition*, needs electromagnetic science) - 10 tesla ammo, 2
-supercapacitor, 5 tungsten plate, 1 processing unit. 1,200 electric damage within 12 tiles, units
-stunned for 5 s, worms and nests switched off for 8 s, tesla chain lightning jumping between enemies.
-
-**Incendiary rod** (research *Orbital incendiary munition*, after the flamethrower) - 10
-flamethrower ammo, 5 tungsten plate, 1 low density structure, 1 processing unit. Sprays burning
-streams over 10 tiles; the ground burns for 15 s at 8 fire damage per tick per flame.
+The **orbital cannon** (1 artillery turret, 50 tungsten plate, 20 low density structure, 20
+processing unit) has three ammo slots and fires one round per reload. A queue holds up to 40
+waiting targets per planet.
 
 ## For other mods
 
 ```lua
 -- returns ok, err (a localised string) - same checks as the designator
 remote.call("orbital-bombardment", "order_strike", force_name, surface_name_or_index, {x = 0, y = 0},
-    {ammo = "orbital-cluster-rod"}) -- ammo optional, default tungsten-penetrator
+    {ammo = "orbital-guided-rod"}) -- ammo optional, default tungsten-penetrator; positions as {x =, y =} or {x, y}
 ```
 
 ## Compatibility

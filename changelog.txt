@@ -1,4 +1,36 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.7.1
+Date: 2026-10-17
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.7.0, which is the Factorio 2.1 release.
+---------------------------------------------------------------------------------------------------
+Version: 0.7.0
+Date: 2026-10-17
+  Features:
+    - Guided rod, from the new research Orbital guided munition: the designator locks it on to the
+      nearest enemy under the click - unit, nest, worm, pentapod or demolisher. The marker and the
+      countdown follow the target, and one second before impact the rod commits to where the target
+      will be by then, leading its movement. Only a change of direction in that last second dodges
+      it. One rod killed a small demolisher in testing.
+  Balancing:
+    - Every round now has its own profile in speed, radius and damage; before, they all flew 5
+      seconds, reloaded in 10 and covered similar circles.
+      * Tungsten slug: 2 s to impact, 4 s reload, radius 2.5 - 25,000 on one point, hardly any splash.
+      * EMP rod: 3 s, 8 s, radius 14 - 600 electric, stun and shutdown as before.
+      * Tungsten penetrator: 5 s, 10 s, radius 10 - unchanged.
+      * Incendiary rod: 6 s, 10 s, radius 7 - an 800 fire burst, then the fire does the work.
+      * Cluster rod: 7 s, 12 s, radius 20 - 16 bomblets of 2,800 each.
+      * Guided rod: 8 s, 15 s, radius 4 - 30,000 direct hit, 3,500 around it.
+    - The ammo bar's tooltip shows each round's radius, flight time, reload and damage.
+  Graphics:
+    - Every round leaves its own mark, so the aftermath shows what hit: a large crater with a ring of
+      churned ground (penetrator), a single small hole (slug), a field of small craters (cluster
+      rod), a blackened disc (incendiary rod), a mid-sized crater (guided rod) and no crater at all
+      from the EMP.
+  Bugfixes:
+    - The penetrator's big scorchmark vanished the moment it appeared: it was created before the
+      crater ground was laid, and scorchmarks are removed when a tile is placed under them.
+    - The remote interface failed on positions given as {x, y} without keys.
 Version: 0.6.1
 Date: 2026-10-17
   Changes:

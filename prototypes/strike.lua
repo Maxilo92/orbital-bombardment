@@ -222,6 +222,29 @@ data:extend({streak, streak_chart, streak_small, streak_small_chart})
 
 local radius = shared.AMMO["tungsten-penetrator"].radius
 
+-- Every round leaves its own mark, so the aftermath tells which one hit:
+-- a crater of nuclear ground, then a scorchmark on top, then crater
+-- decoratives. The order matters: scorchmarks are removed when a tile is
+-- placed under them, so a crater set after the scorchmark erased it (which is
+-- why 0.6 and earlier left hardly a trace).
+local function crater(tile_radius, scorchmark, decorative)
+    local effects = {
+        {type = "set-tile", tile_name = "nuclear-ground", radius = tile_radius, apply_projection = true,
+         tile_collision_mask = {layers = {water_tile = true}}},
+        {type = "create-entity", entity_name = scorchmark, offsets = {{0, -0.5}}},
+    }
+    if decorative then
+        effects[#effects + 1] = {type = "create-decorative", decorative = decorative,
+            spawn_min = 1, spawn_max = 1, spawn_min_radius = 0, spawn_max_radius = 0.5, apply_projection = true}
+    end
+    return effects
+end
+
+local function with(list, extra)
+    for _, effect in ipairs(extra) do list[#list + 1] = effect end
+    return list
+end
+
 -- The projectile only carries the impact to the ground in exactly FALL_TICKS;
 -- everything visible about the fall is the streak above.
 local rod = {
@@ -241,9 +264,15 @@ local rod = {
                 {type = "destroy-cliffs", radius = 6, explosion_at_trigger = "explosion"},
                 {type = "create-entity", entity_name = flash.name},
                 {type = "create-entity", entity_name = burst.name, repeat_count = 8, offset_deviation = {{-3.5, -3.5}, {3.5, 3.5}}},
-                {type = "create-entity", entity_name = "huge-scorchmark", offsets = {{0, -0.5}}},
-                {type = "set-tile", tile_name = "nuclear-ground", radius = 4, apply_projection = true,
+                {type = "set-tile", tile_name = "nuclear-ground", radius = 5, apply_projection = true,
                  tile_collision_mask = {layers = {water_tile = true}}},
+                {type = "create-entity", entity_name = "huge-scorchmark", offsets = {{0, -0.5}}},
+                {type = "create-decorative", decorative = "crater-large", spawn_min = 1, spawn_max = 1,
+                 spawn_min_radius = 0, spawn_max_radius = 0.5, apply_projection = true},
+                {type = "create-decorative", decorative = "nuclear-ground-patch", spawn_min = 18, spawn_max = 26,
+                 spawn_min_radius = 5.5, spawn_max_radius = 8, apply_projection = true, spread_evenly = true},
+                {type = "create-decorative", decorative = "crater-small", spawn_min = 4, spawn_max = 7,
+                 spawn_min_radius = 3, spawn_max_radius = 7, apply_projection = true},
                 {type = "destroy-decoratives", radius = radius, include_soft_decoratives = true,
                  include_decals = true, invoke_decorative_trigger = true, decoratives_with_trigger_only = false},
                 {type = "invoke-tile-trigger", repeat_count = 1},
@@ -307,9 +336,8 @@ slug_flash.light_size_factor_final = 0.6
 local slug_rod = table.deepcopy(rod)
 slug_rod.name = "orbital-slug-strike"
 slug_rod.light = {intensity = 1, size = 12, color = {r = 1, g = 0.85, b = 0.7}}
-slug_rod.action.action_delivery.target_effects = {
+slug_rod.action.action_delivery.target_effects = with(crater(1.5, "medium-scorchmark", "crater-small"), {
     {type = "create-entity", entity_name = slug_flash.name},
-    {type = "create-entity", entity_name = "medium-scorchmark", offsets = {{0, -0.5}}},
     {type = "destroy-decoratives", radius = slug_radius, include_soft_decoratives = true,
      include_decals = true, invoke_decorative_trigger = true, decoratives_with_trigger_only = false},
     {type = "invoke-tile-trigger", repeat_count = 1},
@@ -330,9 +358,9 @@ slug_rod.action.action_delivery.target_effects = {
     {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
     -- Whatever is hit takes the whole impact.
     area_damage(1.5, {{amount = 25000, type = "physical"}}),
-    area_damage(slug_radius, {{amount = 1500, type = "physical"}, {amount = 500, type = "explosion"}}),
+    area_damage(slug_radius, {{amount = 1000, type = "physical"}}),
     wave(p_dust.name, 40, 3, 0.6),
-}
+})
 
 data:extend({slug_flash, slug_rod})
 
@@ -346,10 +374,9 @@ data:extend({slug_flash, slug_rod})
 local bomblet = table.deepcopy(rod)
 bomblet.name = "orbital-cluster-bomblet"
 bomblet.light = {intensity = 0.8, size = 10, color = {r = 1, g = 0.8, b = 0.6}}
-bomblet.action.action_delivery.target_effects = {
+bomblet.action.action_delivery.target_effects = with(crater(1.2, "medium-scorchmark", "crater-small"), {
     {type = "create-entity", entity_name = burst.name},
     {type = "create-entity", entity_name = burst.name, repeat_count = 2, offset_deviation = {{-1.5, -1.5}, {1.5, 1.5}}},
-    {type = "create-entity", entity_name = "medium-scorchmark", offsets = {{0, -0.5}}},
     {type = "destroy-decoratives", radius = 3, include_soft_decoratives = true,
      include_decals = true, invoke_decorative_trigger = true, decoratives_with_trigger_only = false},
     {type = "create-particle", particle_name = "stone-particle-medium", repeat_count = 25,
@@ -363,9 +390,9 @@ bomblet.action.action_delivery.target_effects = {
     {type = "camera-effect", duration = 15, ease_in_duration = 1, ease_out_duration = 20, delay = 0,
      strength = 1.2, full_strength_max_distance = 40, max_distance = 200},
     {type = "play-sound", sound = sounds.large_explosion(0.8), play_on_target_position = true, max_distance = 300},
-    area_damage(3.5, {{amount = 3000, type = "explosion"}, {amount = 1000, type = "physical"}}),
-    wave(p_dust.name, 25, 3.5, 0.6),
-}
+    area_damage(3, {{amount = 2000, type = "explosion"}, {amount = 800, type = "physical"}}),
+    wave(p_dust.name, 25, 3, 0.6),
+})
 
 data:extend({bomblet})
 
@@ -425,7 +452,7 @@ emp_rod.name = "orbital-emp-strike"
 emp_rod.light = {intensity = 1, size = 16, color = {r = 0.6, g = 0.85, b = 1}}
 emp_rod.action.action_delivery.target_effects = {
     {type = "create-entity", entity_name = emp_flash.name},
-    {type = "create-entity", entity_name = "medium-scorchmark", offsets = {{0, -0.5}}},
+    {type = "create-entity", entity_name = "small-scorchmark", offsets = {{0, -0.5}}},
     {type = "create-particle", particle_name = "spark-particle-debris", repeat_count = 120,
      initial_height = 0.6, initial_vertical_speed = 0.2, initial_vertical_speed_deviation = 0.15,
      speed_from_center = 0.5, speed_from_center_deviation = 0.35, offset_deviation = {{-1, -1}, {1, 1}},
@@ -531,6 +558,9 @@ napalm_flame.initial_lifetime = shared.NAPALM_BURN_TICKS
 napalm_flame.lifetime_increase_by = 0
 napalm_flame.maximum_lifetime = shared.NAPALM_BURN_TICKS
 napalm_flame.maximum_spread_count = 30
+-- Its mark: charred ground, darker and lasting far longer than a flamethrower's.
+napalm_flame.burnt_patch_lifetime = 5 * 60 * 60
+napalm_flame.burnt_patch_alpha_default = 0.85
 
 -- The flamethrower's stream, flying faster and setting napalm instead of its
 -- ordinary fire where it lands. control.lua sprays these out from ground zero.
@@ -539,8 +569,14 @@ napalm_stream.name = "orbital-napalm-stream"
 napalm_stream.particle_horizontal_speed = 0.55
 napalm_stream.particle_horizontal_speed_deviation = 0.05
 for _, action in pairs(napalm_stream.action) do
-    for _, effect in pairs(action.action_delivery.target_effects) do
+    local effects = action.action_delivery.target_effects
+    for _, effect in pairs(effects) do
         if effect.type == "create-fire" then effect.entity_name = napalm_flame.name end
+    end
+    if action.type == "direct" then
+        -- Every splash chars the ground: together a blackened disc, the
+        -- incendiary rod's mark (the flames' own burnt patches are too faint).
+        effects[#effects + 1] = {type = "create-entity", entity_name = "medium-scorchmark", offsets = {{0, -0.5}}}
     end
 end
 
@@ -550,7 +586,15 @@ incendiary_rod.light = {intensity = 1, size = 18, color = {r = 1, g = 0.6, b = 0
 incendiary_rod.action.action_delivery.target_effects = {
     {type = "create-entity", entity_name = flash.name},
     {type = "create-entity", entity_name = burst.name, repeat_count = 5, offset_deviation = {{-2.5, -2.5}, {2.5, 2.5}}},
-    {type = "create-entity", entity_name = "huge-scorchmark", offsets = {{0, -0.5}}},
+    {type = "create-entity", entity_name = "medium-scorchmark", offsets = {{0, -0.5}}},
+    {type = "nested-result", action = {
+        type = "area", target_entities = false, trigger_from_target = true,
+        repeat_count = 6, radius = shared.AMMO["orbital-incendiary-rod"].radius * 0.8, show_in_tooltip = false,
+        action_delivery = {type = "instant", target_effects = {
+            {type = "create-entity", entity_name = "nuclear-smouldering-smoke-source",
+             tile_collision_mask = {layers = {water_tile = true}}},
+        }},
+    }},
     {type = "create-particle", particle_name = "spark-particle-debris", repeat_count = 60,
      initial_height = 0.6, initial_vertical_speed = 0.25, initial_vertical_speed_deviation = 0.15,
      speed_from_center = 0.45, speed_from_center_deviation = 0.3, offset_deviation = {{-1, -1}, {1, 1}},
@@ -560,8 +604,41 @@ incendiary_rod.action.action_delivery.target_effects = {
      strength = 4, full_strength_max_distance = 50, max_distance = 220},
     {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
     -- The burst itself, before the fire takes over.
-    area_damage(4, {{amount = 1500, type = "fire"}, {amount = 500, type = "explosion"}}),
+    area_damage(3, {{amount = 800, type = "fire"}}),
     wave(p_fire.name, 60, 4, 0.8),
 }
 
 data:extend({napalm_flame, napalm_stream, incendiary_rod})
+
+--------------------------------------------------------------------------------
+-- the guided rod
+--------------------------------------------------------------------------------
+
+-- A slug with a seeker: everything goes into what it locked on to, with a
+-- little more blast than the plain slug so a target that dodged at the last
+-- moment still gets hurt. Its mark is a crater between slug and penetrator.
+local guided_radius = shared.AMMO["orbital-guided-rod"].radius
+local guided_rod = table.deepcopy(rod)
+guided_rod.name = "orbital-guided-strike"
+guided_rod.light = {intensity = 1, size = 14, color = {r = 0.8, g = 1, b = 0.7}}
+guided_rod.action.action_delivery.target_effects = with(crater(2.5, "big-scorchmark", "crater-small"), {
+    {type = "create-entity", entity_name = slug_flash.name},
+    {type = "create-entity", entity_name = burst.name, repeat_count = 2, offset_deviation = {{-1, -1}, {1, 1}}},
+    {type = "invoke-tile-trigger", repeat_count = 1},
+    {type = "create-particle", particle_name = "stone-particle-big", repeat_count = 25,
+     initial_height = 0.5, initial_vertical_speed = 0.28, initial_vertical_speed_deviation = 0.12,
+     speed_from_center = 0.3, speed_from_center_deviation = 0.15, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 6, tail_length_deviation = 4, tail_width = 3, only_when_visible = true},
+    {type = "create-particle", particle_name = "spark-particle-debris", repeat_count = 50,
+     initial_height = 0.6, initial_vertical_speed = 0.25, initial_vertical_speed_deviation = 0.15,
+     speed_from_center = 0.5, speed_from_center_deviation = 0.3, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 12, tail_length_deviation = 6, tail_width = 2, only_when_visible = true},
+    {type = "camera-effect", duration = 20, ease_in_duration = 1, ease_out_duration = 30, delay = 0,
+     strength = 3.5, full_strength_max_distance = 40, max_distance = 180},
+    {type = "play-sound", sound = sounds.large_explosion(1.0), play_on_target_position = true, max_distance = 300},
+    area_damage(2.5, {{amount = 30000, type = "physical"}}),
+    area_damage(guided_radius, {{amount = 2500, type = "explosion"}, {amount = 1000, type = "physical"}}),
+    wave(p_dust.name, 50, 4, 0.7),
+})
+
+data:extend({guided_rod})

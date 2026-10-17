@@ -1,4 +1,23 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.4.1
+Date: 2026-10-17
+  Changes:
+    - Release for Factorio 2.0. Same content as 0.4.0, which is the Factorio 2.1 release.
+---------------------------------------------------------------------------------------------------
+Version: 0.4.0
+Date: 2026-10-17
+  Features:
+    - Cluster rod, from the new research Orbital cluster munition: it breaks up high above the target
+      and rains twelve bomblets over a 12 tile circle. Each bomblet is enough to destroy a fully
+      evolved nest it lands next to - one rod cleared a field of nine nests and three worms at
+      evolution 1.0.
+    - Choose the round per target: while the designator is in hand, a bar at the top of the screen
+      shows every researched round with how many are loaded over the planet in view. Click one and
+      the targets you mark from then on are struck with it.
+    - The cannon has three ammo slots, so one cannon can keep several kinds of round ready.
+    - Each marker shows the icon of the round it is waiting for. A target whose round is not loaded
+      says so ("no cluster rod loaded") and no longer holds up other targets behind it.
+    - The status panel lists what the cannon has loaded.
 Version: 0.3.1
 Date: 2026-10-17
   Changes:

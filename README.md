@@ -10,7 +10,7 @@ the planet below, mark a target - and a tungsten rod comes down on it from space
 3. Load it with **Tungsten penetrators** - by hand, by inserter or by logistic request.
 4. Park the platform at a planet. The cannon only fires while the platform is stopped in orbit.
 5. Take the **Orbital strike designator** from the shortcut bar, open remote view of the planet
-   and click a target. Drag a box to aim at its centre. **Shift + right click/drag** cancels
+   and click a target. The bar at the top of the screen picks which round comes down. Drag a box to aim at its centre. **Shift + right click/drag** cancels
    targets that have not been fired yet.
 
 A marked target waits in a queue until a cannon over that planet is loaded and ready; the marker
@@ -40,11 +40,16 @@ processing unit. Twenty per rocket.
 **Tungsten slug** - 10 tungsten plate. Twenty-five per rocket. 25,000 physical within 1.5 tiles,
 little else: the precision round against single targets.
 
+**Cluster rod** (research *Orbital cluster munition*) - 6 tungsten carbide, 10 explosives, 2 low
+density structure, 2 processing unit. Breaks up into 12 bomblets over a 12 tile circle, each 3,000
+explosion + 1,000 physical within 3.5 tiles.
+
 ## For other mods
 
 ```lua
 -- returns ok, err (a localised string) - same checks as the designator
-remote.call("orbital-bombardment", "order_strike", force_name, surface_name_or_index, {x = 0, y = 0})
+remote.call("orbital-bombardment", "order_strike", force_name, surface_name_or_index, {x = 0, y = 0},
+    {ammo = "orbital-cluster-rod"}) -- ammo optional, default tungsten-penetrator
 ```
 
 ## Compatibility

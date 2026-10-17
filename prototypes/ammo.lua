@@ -63,3 +63,28 @@ local slug_recipe = {
 }
 
 data:extend({slug, slug_recipe})
+
+-- Cluster rod: breaks up high above the target and rains a dozen bomblets over
+-- a wide circle - for nests spread too far apart for one penetrator.
+local cluster = table.deepcopy(penetrator)
+cluster.name = "orbital-cluster-rod"
+cluster.icons = {{icon = "__space-age__/graphics/icons/railgun-ammo.png", tint = {r = 1, g = 0.55, b = 0.35}}}
+cluster.order = "d[explosive-cannon-shell]-e[orbital]-c[cluster-rod]"
+cluster.stack_size = 10
+cluster.weight = 50 * kg
+
+local cluster_recipe = {
+    type = "recipe",
+    name = "orbital-cluster-rod",
+    enabled = false,
+    energy_required = 20,
+    ingredients = {
+        {type = "item", name = "tungsten-carbide", amount = 6},
+        {type = "item", name = "explosives", amount = 10},
+        {type = "item", name = "low-density-structure", amount = 2},
+        {type = "item", name = "processing-unit", amount = 2},
+    },
+    results = {{type = "item", name = "orbital-cluster-rod", amount = 1}},
+}
+
+data:extend({cluster, cluster_recipe})

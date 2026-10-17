@@ -5,6 +5,7 @@ local DESIGNATOR = shared.DESIGNATOR
 local UPDATE_INTERVAL = 10
 local REENTRY_SOUND_TICKS = 75 -- the roar is 1.25 s long and ends on the impact
 local GUI_NAME = "orbital_cannon_status"
+local SELECTOR_NAME = "orbital_ammo_selector"
 
 -- Render colours are premultiplied (rgb already scaled by alpha).
 local LINE_QUEUED = {r = 0.85, g = 0.65, b = 0.1, a = 0.85}
@@ -17,16 +18,26 @@ local TEXT_INBOUND = {r = 1, g = 0.35, b = 0.25}
 -- storage
 --------------------------------------------------------------------------------
 
--- storage.cannons  [unit_number] = {entity = LuaEntity, ready_tick = uint}
--- storage.targets  array, oldest first, of
---                  {force_index, surface_index, planet, position, state = "queued" | "inbound",
---                   reason, strike, radius, impact_tick, sound_played, fall_spawned,
---                   objects = {LuaRenderObject}, label = LuaRenderObject, label_key}
--- storage.guis     [player_index] = unit_number of the cannon whose window is open
+-- storage.cannons    [unit_number] = {entity = LuaEntity, ready_tick = uint}
+-- storage.targets    array, oldest first, of
+--                    {force_index, surface_index, planet, position, ammo, state = "queued" | "inbound",
+--                     reason, radius, impact_tick, sound_played, fall_spawned, flashed,
+--                     objects = {LuaRenderObject}, label = LuaRenderObject, label_key}
+-- storage.guis       [player_index] = unit_number of the cannon whose window is open
+-- storage.selected   [player_index] = ammo the player's designator marks targets for
+-- storage.selectors  [player_index] = true while the ammo bar is shown
+-- storage.rng        LuaRandomGenerator for where cluster bomblets land
 local function init_storage()
     storage.cannons = storage.cannons or {}
     storage.targets = storage.targets or {}
     storage.guis = storage.guis or {}
+    storage.selected = storage.selected or {}
+    storage.selectors = storage.selectors or {}
+    storage.rng = storage.rng or game.create_random_generator()
+    -- Targets from 0.3 and earlier knew only one round.
+    for _, target in pairs(storage.targets) do
+        target.ammo = target.ammo or shared.AMMO_ORDER[1]
+    end
 end
 
 local function register(entity)
@@ -58,26 +69,31 @@ local function orbit_of(entity)
     return location and location.name
 end
 
-local function ammo_stack(entity)
-    local inventory = entity.get_inventory(defines.inventory.artillery_turret_ammo)
+local function ammo_inventory(entity)
+    return entity.get_inventory(defines.inventory.artillery_turret_ammo)
+end
+
+-- The first stack of `ammo` in the cannon, or nil.
+local function ammo_stack(entity, ammo)
+    local inventory = ammo_inventory(entity)
     if not inventory then return nil end
     for i = 1, #inventory do
         local stack = inventory[i]
-        if stack.valid_for_read and shared.AMMO[stack.name] then return stack end
+        if stack.valid_for_read and stack.name == ammo then return stack end
     end
     return nil
 end
 
--- A cannon of `force` parked over `planet` that can fire right now, or nil and
--- the reason none can: "no-cannon", "no-ammo" or "reloading".
-local function pick_cannon(force_index, planet, tick)
+-- A cannon of `force` parked over `planet` that can fire `ammo` right now, or
+-- nil and the reason none can: "no-cannon", "no-ammo" or "reloading".
+local function pick_cannon(force_index, planet, ammo, tick)
     local reason = "no-cannon"
     for id, cannon in pairs(storage.cannons) do
         local entity = cannon.entity
         if not entity.valid then
             storage.cannons[id] = nil
         elseif entity.force.index == force_index and orbit_of(entity) == planet then
-            if not ammo_stack(entity) then
+            if not ammo_stack(entity, ammo) then
                 if reason == "no-cannon" then reason = "no-ammo" end
             elseif cannon.ready_tick > tick then
                 reason = "reloading"
@@ -97,6 +113,25 @@ local function has_cannon_over(force_index, planet)
         end
     end
     return false
+end
+
+-- Rounds of each ammo loaded in the force's cannons over `planet`.
+local function rounds_over(force_index, planet)
+    local counts = {}
+    for _, cannon in pairs(storage.cannons) do
+        local entity = cannon.entity
+        if entity.valid and entity.force.index == force_index and orbit_of(entity) == planet then
+            for name, count in pairs(shared.count_ammo(ammo_inventory(entity))) do
+                counts[name] = (counts[name] or 0) + count
+            end
+        end
+    end
+    return counts
+end
+
+local function is_unlocked(force, ammo)
+    local recipe = force.recipes[ammo]
+    return recipe ~= nil and recipe.enabled
 end
 
 --------------------------------------------------------------------------------
@@ -122,7 +157,8 @@ local function update_label(target, tick)
         text = {"orbital-bombardment.marker-inbound", seconds}
     else
         key = "q" .. target.reason
-        text = {"orbital-bombardment.marker-queued", {"orbital-bombardment.reason-" .. target.reason}}
+        text = {"orbital-bombardment.marker-queued",
+            {"orbital-bombardment.reason-" .. target.reason, "[item=" .. target.ammo .. "]"}}
     end
     if key ~= target.label_key then
         label.text = text
@@ -185,6 +221,7 @@ local function draw_markers(target, tick)
             draw_on_ground = true,
         }
     end
+    -- The round's icon in front of the label, so mixed targets stay apart.
     target.label = rendering.draw_text{
         text = "",
         surface = surface,
@@ -194,8 +231,17 @@ local function draw_markers(target, tick)
         alignment = "center",
         vertical_alignment = "bottom",
         forces = forces,
+        use_rich_text = true,
     }
     objects[#objects + 1] = target.label
+    objects[#objects + 1] = rendering.draw_sprite{
+        sprite = "item/" .. target.ammo,
+        target = {x = target.position.x, y = target.position.y - target.radius - 3.2},
+        surface = surface,
+        forces = forces,
+        x_scale = 1.5,
+        y_scale = 1.5,
+    }
     update_label(target, tick)
 end
 
@@ -205,8 +251,7 @@ end
 
 local function fire(cannon, target, tick)
     local entity = cannon.entity
-    local stack = ammo_stack(entity)
-    local ammo = shared.AMMO[stack.name]
+    local stack = ammo_stack(entity, target.ammo)
     if stack.count > 1 then
         stack.count = stack.count - 1
     else
@@ -222,32 +267,30 @@ local function fire(cannon, target, tick)
     surface.play_sound{path = "orbital-cannon-fire", position = entity.position}
 
     target.state = "inbound"
-    target.strike = ammo.strike
-    target.radius = ammo.radius
     -- Impact lands on the processing grid, so the fall starts exactly
     -- FALL_TICKS before it and the map flash goes off on the impact tick.
     target.impact_tick = math.ceil((tick + shared.FLIGHT_TICKS) / UPDATE_INTERVAL) * UPDATE_INTERVAL
     draw_markers(target, tick)
 end
 
--- The rod covers FALL_HEIGHT tiles in FALL_TICKS - far too fast to see as an
--- object. What is seen is the streak explosion, whose head reaches the ground
--- in the same ten ticks. Neither is drawn on the map, so the streak is drawn
--- there as well (render_mode "chart"), started on its first frame.
+-- A falling body covers FALL_HEIGHT tiles in FALL_TICKS - far too fast to see
+-- as an object. What is seen is the streak explosion, whose head reaches the
+-- ground in the same ten ticks. Neither is drawn on the map, so the streak is
+-- drawn there as well (render_mode "chart"), started on its first frame.
 local STREAK_SPEED, STREAK_FRAMES = 0.4, 16 -- as in prototypes/strike.lua
 
-local function spawn_rod(target, surface, tick)
-    local position = target.position
+local function spawn_fall(surface, position, strike, force, tick, small)
     surface.create_entity{
-        name = target.strike,
+        name = strike,
         position = {x = position.x, y = position.y - shared.FALL_HEIGHT},
         target = position,
         speed = shared.FALL_HEIGHT / shared.FALL_TICKS,
-        force = game.forces[target.force_index],
+        force = force,
     }
-    surface.create_entity{name = "orbital-reentry-streak", position = position}
+    local streak = small and "orbital-reentry-streak-small" or "orbital-reentry-streak"
+    surface.create_entity{name = streak, position = position}
     rendering.draw_animation{
-        animation = "orbital-reentry-streak-chart",
+        animation = streak .. "-chart",
         target = position,
         surface = surface,
         render_mode = "chart",
@@ -255,7 +298,29 @@ local function spawn_rod(target, surface, tick)
         animation_offset = -(tick * STREAK_SPEED) % STREAK_FRAMES,
         time_to_live = math.floor(STREAK_FRAMES / STREAK_SPEED),
     }
-    surface.play_sound{path = "orbital-sonic-boom", position = position}
+end
+
+-- A random point within `radius` of `center`, evenly spread over the disc.
+local function random_in_disc(center, radius)
+    local rng = storage.rng
+    local angle = rng() * 2 * math.pi
+    local distance = math.sqrt(rng()) * radius
+    return {x = center.x + math.cos(angle) * distance, y = center.y + math.sin(angle) * distance}
+end
+
+local function spawn_strike(target, surface, tick)
+    local ammo = shared.AMMO[target.ammo]
+    local force = game.forces[target.force_index]
+    if ammo.bomblets then
+        -- The cluster rod breaks up high above the target and its bomblets
+        -- rain down over the whole circle at once.
+        for _ = 1, ammo.bomblets do
+            spawn_fall(surface, random_in_disc(target.position, ammo.spread), ammo.strike, force, tick, true)
+        end
+    else
+        spawn_fall(surface, target.position, ammo.strike, force, tick, false)
+    end
+    surface.play_sound{path = "orbital-sonic-boom", position = target.position}
     target.fall_spawned = true
 end
 
@@ -279,7 +344,7 @@ end
 local function fire_queued(tick)
     for _, target in ipairs(storage.targets) do
         if target.state == "queued" then
-            local cannon, reason = pick_cannon(target.force_index, target.planet, tick)
+            local cannon, reason = pick_cannon(target.force_index, target.planet, target.ammo, tick)
             if cannon then
                 fire(cannon, target, tick)
             elseif reason ~= target.reason then
@@ -304,7 +369,7 @@ local function process_targets(tick)
                 target.sound_played = true
             end
             if not target.fall_spawned and tick >= target.impact_tick - shared.FALL_TICKS then
-                spawn_rod(target, surface, tick)
+                spawn_strike(target, surface, tick)
             end
             if target.fall_spawned and not target.flashed and tick >= target.impact_tick then
                 flash_on_map(target, surface)
@@ -325,10 +390,16 @@ end
 -- marking and cancelling targets
 --------------------------------------------------------------------------------
 
--- Queues a strike. Returns the target, or nil and a localised reason why not.
--- `ignore_chart` exists for headless tests only: the benchmark mode they run in
--- never charts anything.
-local function order_strike(force, surface, position, tick, ignore_chart)
+-- Queues a strike with `ammo`. Returns the target, or nil and a localised
+-- reason why not. `ignore_chart` exists for headless tests only: the benchmark
+-- mode they run in never charts anything.
+local function order_strike(force, surface, position, tick, ammo, ignore_chart)
+    if not shared.AMMO[ammo] then
+        return nil, {"orbital-bombardment.error-unknown-ammo"}
+    end
+    if not is_unlocked(force, ammo) then
+        return nil, {"orbital-bombardment.error-ammo-locked", "[item=" .. ammo .. "]"}
+    end
     local planet = surface.planet
     if not planet then
         return nil, {"orbital-bombardment.error-no-planet"}
@@ -355,9 +426,10 @@ local function order_strike(force, surface, position, tick, ignore_chart)
         surface_index = surface.index,
         planet = planet.name,
         position = {x = position.x, y = position.y},
+        ammo = ammo,
         state = "queued",
         reason = "no-cannon",
-        radius = shared.AMMO["tungsten-penetrator"].radius,
+        radius = shared.AMMO[ammo].radius,
         objects = {},
     }
     storage.targets[#storage.targets + 1] = target
@@ -408,6 +480,82 @@ local function notify(player, message)
 end
 
 --------------------------------------------------------------------------------
+-- ammo bar, shown while the designator is in hand
+--------------------------------------------------------------------------------
+
+local function unlocked_ammo(force)
+    local list = {}
+    for _, ammo in ipairs(shared.AMMO_ORDER) do
+        if is_unlocked(force, ammo) then list[#list + 1] = ammo end
+    end
+    return list
+end
+
+-- The player's chosen ammo, falling back to the first unlocked one.
+local function selected_ammo(player)
+    local selected = storage.selected[player.index]
+    if selected and shared.AMMO[selected] and is_unlocked(player.force, selected) then
+        return selected
+    end
+    return unlocked_ammo(player.force)[1] or shared.AMMO_ORDER[1]
+end
+
+local function hide_selector(player)
+    local frame = player.gui.screen[SELECTOR_NAME]
+    if frame then frame.destroy() end
+    storage.selectors[player.index] = nil
+end
+
+-- Counts follow the planet in view: in remote view that is the planet below,
+-- not the platform the player is standing on.
+local function update_selector(player)
+    local frame = player.gui.screen[SELECTOR_NAME]
+    if not frame then return end
+    local planet = player.surface.planet
+    local counts = planet and rounds_over(player.force.index, planet.name) or {}
+    local selected = selected_ammo(player)
+    for _, button in pairs(frame.buttons.children) do
+        local ammo = button.tags.orbital_ammo
+        button.toggled = ammo == selected
+        button.number = planet and (counts[ammo] or 0) or nil
+    end
+end
+
+local function show_selector(player)
+    hide_selector(player)
+    local ammo_list = unlocked_ammo(player.force)
+    if #ammo_list == 0 then return end
+    local frame = player.gui.screen.add{
+        type = "frame",
+        name = SELECTOR_NAME,
+        caption = {"orbital-bombardment.selector-title"},
+        direction = "vertical",
+    }
+    frame.style.use_header_filler = false
+    local buttons = frame.add{type = "frame", name = "buttons", style = "slot_button_deep_frame", direction = "horizontal"}
+    for _, ammo in ipairs(ammo_list) do
+        buttons.add{
+            type = "sprite-button",
+            style = "slot_button",
+            sprite = "item/" .. ammo,
+            tooltip = {"", "[font=default-bold]", {"item-name." .. ammo}, "[/font]\n", {"item-description." .. ammo}},
+            tags = {orbital_ammo = ammo},
+        }
+    end
+    -- Top centre, below where the vanilla alerts and research sit.
+    local scale = player.display_scale
+    local width = (#ammo_list * 40 + 24) * scale
+    frame.location = {x = math.floor((player.display_resolution.width - width) / 2), y = math.floor(90 * scale)}
+    storage.selectors[player.index] = true
+    update_selector(player)
+end
+
+local function holds_designator(player)
+    local stack = player.cursor_stack
+    return stack and stack.valid_for_read and stack.name == DESIGNATOR
+end
+
+--------------------------------------------------------------------------------
 -- status window next to the cannon's own window
 --------------------------------------------------------------------------------
 
@@ -426,13 +574,21 @@ local function status_lines(cannon, tick)
     else
         lines[1] = {"orbital-bombardment.status-travelling"}
     end
-    if not ammo_stack(entity) then
+
+    local loaded = {""}
+    for _, ammo in ipairs(shared.AMMO_ORDER) do
+        local count = shared.count_ammo(ammo_inventory(entity))[ammo]
+        if count then loaded[#loaded + 1] = "[item=" .. ammo .. "] " .. count .. "   " end
+    end
+    if #loaded == 1 then
         lines[2] = {"orbital-bombardment.status-no-ammo"}
     elseif cannon.ready_tick > tick then
         lines[2] = {"orbital-bombardment.status-reloading", math.ceil((cannon.ready_tick - tick) / 60)}
     else
         lines[2] = {"orbital-bombardment.status-ready"}
     end
+    lines[3] = #loaded > 1 and {"orbital-bombardment.status-loaded", loaded} or ""
+
     local queued, inbound = 0, 0
     if planet then
         for _, target in pairs(storage.targets) do
@@ -441,7 +597,7 @@ local function status_lines(cannon, tick)
             end
         end
     end
-    lines[3] = {"orbital-bombardment.status-targets", queued, inbound}
+    lines[4] = {"orbital-bombardment.status-targets", queued, inbound}
     return lines
 end
 
@@ -471,7 +627,7 @@ local function open_gui(player, entity, tick)
         },
     }
     local inner = frame.add{type = "frame", name = "inner", style = "inside_shallow_frame_with_padding", direction = "vertical"}
-    for i = 1, 3 do
+    for i = 1, 4 do
         inner.add{type = "label", name = "line" .. i}
     end
     local hint = inner.add{type = "label", caption = {"orbital-bombardment.gui-hint"}}
@@ -510,6 +666,16 @@ script.on_nth_tick(UPDATE_INTERVAL, function(event)
             storage.guis[player_index] = nil
         end
     end
+    for player_index in pairs(storage.selectors) do
+        local player = game.get_player(player_index)
+        if player and holds_designator(player) then
+            update_selector(player)
+        elseif player then
+            hide_selector(player)
+        else
+            storage.selectors[player_index] = nil
+        end
+    end
 end)
 
 local BUILT_FILTER = {{filter = "name", name = CANNON}}
@@ -520,12 +686,33 @@ script.on_event(defines.events.on_space_platform_built_entity, on_built, BUILT_F
 script.on_event(defines.events.script_raised_built, on_built, BUILT_FILTER)
 script.on_event(defines.events.script_raised_revive, on_built, BUILT_FILTER)
 
+script.on_event(defines.events.on_player_cursor_stack_changed, function(event)
+    local player = game.get_player(event.player_index)
+    if not player then return end
+    if holds_designator(player) then
+        if not player.gui.screen[SELECTOR_NAME] then show_selector(player) end
+    elseif storage.selectors[player.index] then
+        hide_selector(player)
+    end
+end)
+
+script.on_event(defines.events.on_gui_click, function(event)
+    local element = event.element
+    local ammo = element.valid and element.tags and element.tags.orbital_ammo
+    if not ammo then return end
+    local player = game.get_player(event.player_index)
+    if not player then return end
+    storage.selected[player.index] = ammo
+    update_selector(player)
+end)
+
 script.on_event(defines.events.on_player_selected_area, function(event)
     if event.item ~= DESIGNATOR then return end
     local player = game.get_player(event.player_index)
     if not player then return end
-    local target, err = order_strike(player.force, event.surface, area_center(event.area), event.tick)
+    local target, err = order_strike(player.force, event.surface, area_center(event.area), event.tick, selected_ammo(player))
     if not target then notify(player, err) end
+    update_selector(player)
 end)
 
 script.on_event(defines.events.on_player_alt_selected_area, function(event)
@@ -560,14 +747,16 @@ script.on_event(defines.events.on_gui_closed, function(event)
 end)
 
 -- For other mods and for tests: order a strike without a player.
+-- options.ammo picks the round (default: the first in shared.AMMO_ORDER);
 -- options.ignore_chart skips the charted-area check (see order_strike).
 remote.add_interface("orbital-bombardment", {
     order_strike = function(force, surface, position, options)
         force = game.forces[force]
         surface = game.surfaces[surface]
         if not (force and surface and position) then return false, "invalid arguments" end
-        local ignore_chart = options and options.ignore_chart or false
-        local target, err = order_strike(force, surface, position, game.tick, ignore_chart)
+        options = options or {}
+        local target, err = order_strike(force, surface, position, game.tick,
+            options.ammo or shared.AMMO_ORDER[1], options.ignore_chart or false)
         return target ~= nil, err
     end,
 })

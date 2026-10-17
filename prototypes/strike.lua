@@ -201,7 +201,20 @@ streak_chart.name = "orbital-reentry-streak-chart"
 streak_chart.draw_as_glow = nil
 streak_chart.animation_speed = 1
 
-data:extend({streak, streak_chart})
+-- A smaller streak for the cluster rod's bomblets. The shift scales with it so
+-- the head still lands on ground zero.
+local SMALL = 0.55
+local streak_small = table.deepcopy(streak)
+streak_small.name = "orbital-reentry-streak-small"
+streak_small.animations[1].scale = SMALL
+streak_small.animations[1].shift = {0, -(1024 / 2 - 30) / 32 * SMALL}
+streak_small.light = {intensity = 0.8, size = 14, color = {r = 1, g = 0.7, b = 0.45}}
+local streak_small_chart = table.deepcopy(streak_chart)
+streak_small_chart.name = "orbital-reentry-streak-small-chart"
+streak_small_chart.scale = SMALL
+streak_small_chart.shift = streak_small.animations[1].shift
+
+data:extend({streak, streak_chart, streak_small, streak_small_chart})
 
 --------------------------------------------------------------------------------
 -- the penetrator
@@ -322,3 +335,36 @@ slug_rod.action.action_delivery.target_effects = {
 }
 
 data:extend({slug_flash, slug_rod})
+
+--------------------------------------------------------------------------------
+-- the cluster rod's bomblets
+--------------------------------------------------------------------------------
+
+-- Each bomblet is a small penetrator: enough to destroy a fully evolved nest it
+-- lands next to (3500 HP), with a short ripple of fire and a burst of
+-- splinters. Twelve of them over a 12 tile circle.
+local bomblet = table.deepcopy(rod)
+bomblet.name = "orbital-cluster-bomblet"
+bomblet.light = {intensity = 0.8, size = 10, color = {r = 1, g = 0.8, b = 0.6}}
+bomblet.action.action_delivery.target_effects = {
+    {type = "create-entity", entity_name = burst.name},
+    {type = "create-entity", entity_name = burst.name, repeat_count = 2, offset_deviation = {{-1.5, -1.5}, {1.5, 1.5}}},
+    {type = "create-entity", entity_name = "medium-scorchmark", offsets = {{0, -0.5}}},
+    {type = "destroy-decoratives", radius = 3, include_soft_decoratives = true,
+     include_decals = true, invoke_decorative_trigger = true, decoratives_with_trigger_only = false},
+    {type = "create-particle", particle_name = "stone-particle-medium", repeat_count = 25,
+     initial_height = 0.4, initial_vertical_speed = 0.2, initial_vertical_speed_deviation = 0.1,
+     speed_from_center = 0.35, speed_from_center_deviation = 0.2, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 8, tail_length_deviation = 4, tail_width = 2, only_when_visible = true},
+    {type = "create-particle", particle_name = "spark-particle-debris", repeat_count = 15,
+     initial_height = 0.6, initial_vertical_speed = 0.22, initial_vertical_speed_deviation = 0.12,
+     speed_from_center = 0.45, speed_from_center_deviation = 0.25, offset_deviation = {{-0.5, -0.5}, {0.5, 0.5}},
+     tail_length = 10, tail_length_deviation = 5, tail_width = 2, only_when_visible = true},
+    {type = "camera-effect", duration = 15, ease_in_duration = 1, ease_out_duration = 20, delay = 0,
+     strength = 1.2, full_strength_max_distance = 40, max_distance = 200},
+    {type = "play-sound", sound = sounds.large_explosion(0.8), play_on_target_position = true, max_distance = 300},
+    area_damage(3.5, {{amount = 3000, type = "explosion"}, {amount = 1000, type = "physical"}}),
+    wave(p_dust.name, 25, 3.5, 0.6),
+}
+
+data:extend({bomblet})

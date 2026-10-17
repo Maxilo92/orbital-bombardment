@@ -28,3 +28,28 @@ data:extend({
         },
     },
 })
+
+data:extend({
+    {
+        type = "technology",
+        name = "orbital-cluster-munition",
+        icons = {{icon = "__base__/graphics/technology/artillery.png", icon_size = 256, tint = {r = 1, g = 0.62, b = 0.45}}},
+        prerequisites = {shared.TECHNOLOGY},
+        effects = {
+            {type = "unlock-recipe", recipe = "orbital-cluster-rod"},
+        },
+        unit = {
+            count = 1500,
+            time = 60,
+            ingredients = {
+                {"automation-science-pack", 1},
+                {"logistic-science-pack", 1},
+                {"chemical-science-pack", 1},
+                {"military-science-pack", 1},
+                {"utility-science-pack", 1},
+                {"space-science-pack", 1},
+                {"metallurgic-science-pack", 1},
+            },
+        },
+    },
+})
